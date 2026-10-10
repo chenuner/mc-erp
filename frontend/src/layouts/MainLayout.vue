@@ -11,15 +11,30 @@ const auth = useAuthStore()
 
 const collapsed = ref(false)
 
-const menus = [
+interface MenuItem {
+  path: string
+  name: string
+  title: string
+  icon: string
+}
+
+const menus: MenuItem[] = [
   { path: '/', name: 'dashboard', title: '工作台', icon: 'layout-dashboard' },
   { path: '/attendance', name: 'attendance', title: '考勤薪酬', icon: 'calendar-clock' },
   { path: '/accounting', name: 'accounting', title: '會計收據', icon: 'receipt' },
   { path: '/storage', name: 'storage', title: '地盤文件', icon: 'hard-drive' },
+]
+
+const systemMenus: MenuItem[] = [
+  { path: '/system/categories', name: 'system-categories', title: '分類字典', icon: 'bookmark' },
   { path: '/system/users', name: 'system-users', title: '用戶管理', icon: 'shield' },
 ]
 
-const activeMenu = computed(() => (route.path === '/' ? 'dashboard' : (route.name as string)))
+const activeMenu = computed(() => {
+  if (route.path === '/') return 'dashboard'
+  if (route.path.startsWith('/system/')) return 'system'
+  return route.name as string
+})
 const breadcrumb = computed(() => ['MC ERP', (route.meta.title as string) ?? ''])
 
 async function handleLogout() {
@@ -46,6 +61,16 @@ async function handleLogout() {
           <AppIcon :name="m.icon" :size="18" />
           <template #title>{{ m.title }}</template>
         </el-menu-item>
+        <el-sub-menu index="system">
+          <template #title>
+            <AppIcon name="settings" :size="18" />
+            <span>系統設置</span>
+          </template>
+          <el-menu-item v-for="m in systemMenus" :key="m.name" :index="m.name" @click="router.push(m.path)">
+            <AppIcon :name="m.icon" :size="18" />
+            <template #title>{{ m.title }}</template>
+          </el-menu-item>
+        </el-sub-menu>
       </el-menu>
     </el-aside>
 

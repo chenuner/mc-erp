@@ -1,6 +1,7 @@
 using MC.Erp.Features.Attendance.Entities;
 using MC.Erp.Features.Identity.Entities;
 using MC.Erp.Features.Storage.Entities;
+using MC.Erp.Features.System.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace MC.Erp.Data;
@@ -20,8 +21,10 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
     public DbSet<AttendanceRecord> AttendanceRecords => Set<AttendanceRecord>();
     public DbSet<MonthlyWorkSummary> MonthlyWorkSummaries => Set<MonthlyWorkSummary>();
 
+    // System（歸檔分類字典，跨模組共享）
+    public DbSet<ArchiveCategory> ArchiveCategories => Set<ArchiveCategory>();
+
     // Storage
-    public DbSet<StorageCategory> StorageCategories => Set<StorageCategory>();
     public DbSet<FileItem> FileItems => Set<FileItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -107,23 +110,25 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
             e.HasIndex(s => new { s.WorkerId, s.Year, s.Month }).IsUnique();
         });
 
-        // Storage 模組
-        modelBuilder.Entity<StorageCategory>(e =>
+        // System 模組：歸檔分類字典（跨模組共享）
+        modelBuilder.Entity<ArchiveCategory>(e =>
         {
-            e.ToTable("storage_categories");
+            e.ToTable("system_archive_categories");
             e.HasQueryFilter(c => !c.IsDeleted);
             e.HasIndex(c => c.SiteName);
-            e.HasMany(c => c.Files)
-                .WithOne(f => f.Category)
-                .HasForeignKey(f => f.CategoryId);
+            e.HasIndex(c => c.EventDate);
         });
 
+        // Storage 模組
         modelBuilder.Entity<FileItem>(e =>
         {
             e.ToTable("storage_files");
             e.HasQueryFilter(f => !f.IsDeleted);
             e.HasIndex(f => f.CategoryId);
             e.HasIndex(f => f.CreatedAt);
+            e.HasOne(f => f.Category)
+                .WithMany()
+                .HasForeignKey(f => f.CategoryId);
         });
     }
 }

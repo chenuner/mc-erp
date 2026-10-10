@@ -7,6 +7,8 @@ using MC.Erp.Features.Identity.Repositories;
 using MC.Erp.Features.Identity.Services;
 using MC.Erp.Features.Storage.Endpoints;
 using MC.Erp.Features.Storage.Services;
+using MC.Erp.Features.System.Endpoints;
+using MC.Erp.Features.System.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Hangfire;
 using Hangfire.PostgreSql;
@@ -66,10 +68,12 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<RoleService>();
 
+// System 模組（歸檔分類字典）
+builder.Services.AddScoped<CategoryService>();
+
 // Storage 模組
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection("Storage"));
 builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
-builder.Services.AddScoped<CategoryService>();
 builder.Services.AddScoped<FileService>();
 
 // Hangfire
@@ -108,6 +112,7 @@ if (app.Environment.IsDevelopment())
 
 // 端點
 app.MapIdentityEndpoints();
+app.MapSystemEndpoints();
 app.MapStorageEndpoints();
 
 // 初始化種子數據

@@ -1,6 +1,6 @@
-using System.ComponentModel.DataAnnotations;
 using MC.Erp.Features.Storage.Entities;
 using MC.Erp.Features.Storage.Services;
+using MC.Erp.Features.System.Entities;
 using Microsoft.AspNetCore.Http.HttpResults;
 
 namespace MC.Erp.Features.Storage.Endpoints;
@@ -11,12 +11,6 @@ public static class StorageEndpoints
     {
         var group = app.MapGroup("/api/storage").WithTags("Storage");
 
-        // 分類字典
-        group.MapGet("/categories", ListCategoriesAsync).RequireAuthorization();
-        group.MapPost("/categories", CreateCategoryAsync).RequireAuthorization();
-        group.MapPut("/categories/{id:guid}", UpdateCategoryAsync).RequireAuthorization();
-        group.MapDelete("/categories/{id:guid}", DeleteCategoryAsync).RequireAuthorization();
-
         // 文件
         group.MapGet("/files", ListFilesAsync).RequireAuthorization();
         group.MapPost("/files", UploadFileAsync)
@@ -26,52 +20,6 @@ public static class StorageEndpoints
         group.MapDelete("/files/{id:guid}", DeleteFileAsync).RequireAuthorization();
     }
 
-    // --- 分類字典 ---
-    private static async Task<Ok<List<CategoryDto>>> ListCategoriesAsync(CategoryService svc, CancellationToken ct)
-    {
-        var items = await svc.列表Async(ct);
-        return TypedResults.Ok(items.Select(x => CategoryDto.From(x.Category, x.FileCount)).ToList());
-    }
-
-    private static async Task<Results<Created<CategoryDto>, BadRequest<string>>> CreateCategoryAsync(
-        CreateCategoryRequest req, CategoryService svc, CancellationToken ct)
-    {
-        try
-        {
-            var category = await svc.创建Async(req.SiteName, req.EventDate, req.EventReason, req.Remark, ct);
-            return TypedResults.Created($"/api/storage/categories/{category.Id}", CategoryDto.From(category, 0));
-        }
-        catch (InvalidOperationException ex)
-        {
-            return TypedResults.BadRequest(ex.Message);
-        }
-    }
-
-    private static async Task<Results<Ok<CategoryDto>, NotFound>> UpdateCategoryAsync(
-        Guid id, UpdateCategoryRequest req, CategoryService svc, CancellationToken ct)
-    {
-        var category = await svc.更新Async(id, req.SiteName, req.EventDate, req.EventReason, req.Remark, ct);
-        return category is null
-            ? TypedResults.NotFound()
-            : TypedResults.Ok(CategoryDto.From(category, -1));
-    }
-
-    private static async Task<Results<NoContent, NotFound, BadRequest<string>>> DeleteCategoryAsync(
-        Guid id, CategoryService svc, CancellationToken ct)
-    {
-        try
-        {
-            return await svc.删除Async(id, ct)
-                ? TypedResults.NoContent()
-                : TypedResults.NotFound();
-        }
-        catch (InvalidOperationException ex)
-        {
-            return TypedResults.BadRequest(ex.Message);
-        }
-    }
-
-    // --- 文件 ---
     private static async Task<Ok<List<FileDto>>> ListFilesAsync(
         Guid? categoryId, FileService svc, CancellationToken ct)
     {
@@ -117,25 +65,11 @@ public static class StorageEndpoints
     }
 }
 
-// DTOs
-public sealed record CategoryDto(Guid Id, string SiteName, DateTime EventDate, string EventReason, string? Remark, int FileCount)
-{
-    public static CategoryDto From(StorageCategory c, int fileCount) =>
-        new(c.Id, c.SiteName, c.EventDate, c.EventReason, c.Remark, fileCount);
-}
 public sealed record FileDto(
     Guid Id, Guid CategoryId, string SiteName, DateTime EventDate, string EventReason,
     string OriginalName, string ContentType, long SizeBytes, string? UploaderName, DateTime CreatedAt)
 {
-    public static FileDto From(FileItem f, StorageCategory c) =>
+    public static FileDto From(FileItem f, ArchiveCategory c) =>
         new(f.Id, f.CategoryId, c.SiteName, c.EventDate, c.EventReason,
             f.OriginalName, f.ContentType, f.SizeBytes, f.UploaderName, f.CreatedAt);
 }
-
-// Requests
-public sealed record CreateCategoryRequest(
-    [Required] string SiteName,
-    [Required] DateTime EventDate,
-    [Required] string EventReason,
-    string? Remark);
-public sealed record UpdateCategoryRequest(string? SiteName, DateTime? EventDate, string? EventReason, string? Remark);

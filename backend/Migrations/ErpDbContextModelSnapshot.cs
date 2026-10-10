@@ -379,7 +379,7 @@ namespace MC.Erp.Migrations
                     b.ToTable("storage_files", (string)null);
                 });
 
-            modelBuilder.Entity("MC.Erp.Features.Storage.Entities.StorageCategory", b =>
+            modelBuilder.Entity("MC.Erp.Features.System.Entities.ArchiveCategory", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -413,9 +413,11 @@ namespace MC.Erp.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("EventDate");
+
                     b.HasIndex("SiteName");
 
-                    b.ToTable("storage_categories", (string)null);
+                    b.ToTable("system_archive_categories", (string)null);
                 });
 
             modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.AttendanceRecord", b =>
@@ -488,8 +490,8 @@ namespace MC.Erp.Migrations
 
             modelBuilder.Entity("MC.Erp.Features.Storage.Entities.FileItem", b =>
                 {
-                    b.HasOne("MC.Erp.Features.Storage.Entities.StorageCategory", "Category")
-                        .WithMany("Files")
+                    b.HasOne("MC.Erp.Features.System.Entities.ArchiveCategory", "Category")
+                        .WithMany()
                         .HasForeignKey("CategoryId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -524,11 +526,6 @@ namespace MC.Erp.Migrations
             modelBuilder.Entity("MC.Erp.Features.Identity.Entities.User", b =>
                 {
                     b.Navigation("UserRoles");
-                });
-
-            modelBuilder.Entity("MC.Erp.Features.Storage.Entities.StorageCategory", b =>
-                {
-                    b.Navigation("Files");
                 });
 #pragma warning restore 612, 618
         }

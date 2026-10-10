@@ -1,6 +1,7 @@
 using MC.Erp.Common.Security;
 using MC.Erp.Data;
 using MC.Erp.Features.Storage.Entities;
+using MC.Erp.Features.System.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace MC.Erp.Features.Storage.Services;
@@ -12,7 +13,7 @@ public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentU
 {
     public async Task<FileItem> 上传Async(Guid categoryId, string originalName, string contentType, long sizeBytes, Stream content, CancellationToken ct)
     {
-        var category = await db.StorageCategories.FirstOrDefaultAsync(c => c.Id == categoryId && !c.IsDeleted, ct)
+        var category = await db.ArchiveCategories.FirstOrDefaultAsync(c => c.Id == categoryId && !c.IsDeleted, ct)
             ?? throw new InvalidOperationException("分類不存在");
 
         var file = new FileItem
@@ -31,7 +32,7 @@ public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentU
         return file;
     }
 
-    public async Task<List<(FileItem File, StorageCategory Category)>> 列表Async(Guid? categoryId, CancellationToken ct)
+    public async Task<List<(FileItem File, ArchiveCategory Category)>> 列表Async(Guid? categoryId, CancellationToken ct)
     {
         var query = db.FileItems
             .AsNoTracking()
@@ -44,7 +45,7 @@ public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentU
 
         return await query
             .OrderByDescending(f => f.CreatedAt)
-            .Select(f => new ValueTuple<FileItem, StorageCategory>(f, f.Category))
+            .Select(f => new ValueTuple<FileItem, ArchiveCategory>(f, f.Category))
             .ToListAsync(ct);
     }
 

@@ -119,6 +119,43 @@ body {
   background: var(--mc-primary-light);
 }
 
+/* 子菜單（系統設置） */
+.mc-menu .el-sub-menu__title {
+  height: 48px;
+  margin: 4px 12px;
+  border-radius: 6px;
+  color: var(--mc-sidebar-text);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.mc-menu .el-sub-menu__title:hover {
+  background: rgb(255 255 255 / 6%);
+  color: #fff;
+}
+
+.mc-menu .el-sub-menu.is-active > .el-sub-menu__title {
+  color: #fff;
+}
+
+.mc-menu .el-sub-menu .el-menu {
+  background: transparent;
+}
+
+.mc-menu .el-sub-menu .el-menu-item {
+  margin-left: 24px;
+  height: 44px;
+  font-size: 13px;
+}
+
+/* 折疊態子菜單彈出 */
+.mc-menu--collapse .el-sub-menu .el-menu {
+  background: var(--mc-sidebar);
+}
+
+.mc-menu--collapse .el-sub-menu .el-menu-item {
+  margin: 4px 8px;
+}
+
 /* 路由切換淡入 */
 .fade-enter-active,
 .fade-leave-active {

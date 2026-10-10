@@ -40,6 +40,12 @@ const router = createRouter({
           meta: { title: '地盤文件' },
         },
         {
+          path: 'system/categories',
+          name: 'system-categories',
+          component: () => import('@/views/system/CategoriesView.vue'),
+          meta: { title: '分類字典' },
+        },
+        {
           path: 'system/users',
           name: 'system-users',
           component: () => import('@/views/identity/UsersView.vue'),

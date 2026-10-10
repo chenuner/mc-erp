@@ -1,15 +1,5 @@
 import request from './request'
 
-/** 分類字典（地盤 / 時間 / 事件原因） */
-export interface CategoryDto {
-  id: string
-  siteName: string
-  eventDate: string
-  eventReason: string
-  remark: string | null
-  fileCount: number
-}
-
 export interface FileDto {
   id: string
   categoryId: string
@@ -21,30 +11,6 @@ export interface FileDto {
   sizeBytes: number
   uploaderName: string | null
   createdAt: string
-}
-
-export async function listCategories(): Promise<CategoryDto[]> {
-  return (await request.get('/storage/categories')) as CategoryDto[]
-}
-
-export async function createCategory(payload: {
-  siteName: string
-  eventDate: string
-  eventReason: string
-  remark?: string
-}): Promise<CategoryDto> {
-  return (await request.post('/storage/categories', payload)) as CategoryDto
-}
-
-export async function updateCategory(
-  id: string,
-  payload: { siteName?: string; eventDate?: string; eventReason?: string; remark?: string },
-): Promise<CategoryDto> {
-  return (await request.put(`/storage/categories/${id}`, payload)) as CategoryDto
-}
-
-export async function deleteCategory(id: string): Promise<void> {
-  await request.delete(`/storage/categories/${id}`)
 }
 
 export async function listFiles(categoryId?: string): Promise<FileDto[]> {
@@ -72,4 +38,9 @@ export async function downloadFile(id: string, fileName: string): Promise<void> 
 
 export async function deleteFile(id: string): Promise<void> {
   await request.delete(`/storage/files/${id}`)
+}
+
+/** 獲取文件二進制流（用於圖片預覽） */
+export async function getFileBlob(id: string): Promise<Blob> {
+  return (await request.get(`/storage/files/${id}/download`, { responseType: 'blob' })) as unknown as Blob
 }

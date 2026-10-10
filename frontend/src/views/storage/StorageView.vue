@@ -1,41 +1,23 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type UploadFile, type UploadFiles, type UploadRequestOptions } from 'element-plus'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox, type UploadFile, type UploadFiles, type UploadRequestOptions } from 'element-plus'
 import AppIcon from '@/components/AppIcon.vue'
+import { listCategories, type CategoryDto } from '@/api/system'
 import {
-  createCategory,
-  deleteCategory,
   deleteFile,
   downloadFile,
-  listCategories,
+  getFileBlob,
   listFiles,
-  updateCategory,
   uploadFile,
-  type CategoryDto,
   type FileDto,
 } from '@/api/storage'
 
-// ---------- 分類字典 ----------
+type ViewMode = 'list' | 'grid'
+
+// ---------- 分類（來自系統字典） ----------
 const categoryLoading = ref(false)
 const categories = ref<CategoryDto[]>([])
-
-const categoryDialog = ref(false)
-const editingId = ref<string | null>(null)
-const categorySubmitting = ref(false)
-const categoryFormRef = ref<FormInstance>()
-
-const categoryForm = reactive({
-  siteName: '',
-  eventDate: '',
-  eventReason: '',
-  remark: '',
-})
-
-const categoryRules: FormRules<typeof categoryForm> = {
-  siteName: [{ required: true, message: '請輸入地盤名稱', trigger: 'blur' }],
-  eventDate: [{ required: true, message: '請選擇時間', trigger: 'change' }],
-  eventReason: [{ required: true, message: '請輸入事件原因', trigger: 'blur' }],
-}
+const filterCategoryId = ref<string>('')
 
 async function fetchCategories() {
   categoryLoading.value = true
@@ -48,72 +30,10 @@ async function fetchCategories() {
   }
 }
 
-function openCategoryCreate() {
-  editingId.value = null
-  categoryForm.siteName = ''
-  categoryForm.eventDate = ''
-  categoryForm.eventReason = ''
-  categoryForm.remark = ''
-  categoryDialog.value = true
-}
-
-function openCategoryEdit(row: CategoryDto) {
-  editingId.value = row.id
-  categoryForm.siteName = row.siteName
-  categoryForm.eventDate = row.eventDate.slice(0, 10)
-  categoryForm.eventReason = row.eventReason
-  categoryForm.remark = row.remark ?? ''
-  categoryDialog.value = true
-}
-
-async function submitCategory() {
-  const valid = await categoryFormRef.value?.validate().catch(() => false)
-  if (!valid) return
-  categorySubmitting.value = true
-  try {
-    if (editingId.value) {
-      await updateCategory(editingId.value, { ...categoryForm })
-      ElMessage.success('分類已更新')
-    } else {
-      await createCategory({ ...categoryForm })
-      ElMessage.success('分類已創建')
-    }
-    categoryDialog.value = false
-    await Promise.all([fetchCategories(), fetchFiles()])
-  } catch {
-    /* 攔截器已提示 */
-  } finally {
-    categorySubmitting.value = false
-  }
-}
-
-async function removeCategory(row: CategoryDto) {
-  await ElMessageBox.confirm(
-    `確定刪除分類「${row.siteName} / ${row.eventReason}」嗎？`,
-    '提示',
-    { confirmButtonText: '刪除', cancelButtonText: '取消', type: 'warning' },
-  )
-  try {
-    await deleteCategory(row.id)
-    ElMessage.success('已刪除')
-    await fetchCategories()
-  } catch {
-    /* 攔截器已提示（有文件引用時後端會拒絕） */
-  }
-}
-
 // ---------- 文件 ----------
 const fileLoading = ref(false)
 const files = ref<FileDto[]>([])
-const filterCategoryId = ref<string>('')
-const uploadCategoryId = ref('')
-const uploadDialog = ref(false)
-const uploading = ref(false)
-const uploadFileList = ref<UploadFiles>([])
-
-const filterCategories = computed(() => categories.value)
-
-const uploadDisabled = computed(() => !uploadCategoryId.value || uploadFileList.value.length === 0)
+const viewMode = ref<ViewMode>('list')
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -123,6 +43,26 @@ function formatSize(bytes: number): string {
 
 function formatDate(iso: string): string {
   return iso.slice(0, 10)
+}
+
+function categoryLabel(c: CategoryDto): string {
+  return `${c.siteName} · ${formatDate(c.eventDate)} · ${c.eventReason}`
+}
+
+interface FileTypeInfo {
+  type: 'image' | 'pdf' | 'doc' | 'sheet' | 'archive' | 'other'
+  label: string
+  icon: string
+}
+
+function fileTypeInfo(contentType: string, name: string): FileTypeInfo {
+  if (contentType.startsWith('image/')) return { type: 'image', label: '圖片', icon: 'image' }
+  const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  if (ext === 'pdf') return { type: 'pdf', label: 'PDF', icon: 'file-text' }
+  if (['doc', 'docx'].includes(ext)) return { type: 'doc', label: '文檔', icon: 'file-text' }
+  if (['xls', 'xlsx'].includes(ext)) return { type: 'sheet', label: '表格', icon: 'file-text' }
+  if (['zip', 'rar', '7z'].includes(ext)) return { type: 'archive', label: '壓縮包', icon: 'hard-drive' }
+  return { type: 'other', label: '文件', icon: 'file-text' }
 }
 
 async function fetchFiles() {
@@ -136,12 +76,20 @@ async function fetchFiles() {
   }
 }
 
+// ---------- 上傳 ----------
+const uploadCategoryId = ref('')
+const uploadDialog = ref(false)
+const uploading = ref(false)
+const uploadFileList = ref<UploadFiles>([])
+
+const uploadDisabled = computed(() => !uploadCategoryId.value || uploadFileList.value.length === 0)
+
 function openUpload() {
   if (categories.value.length === 0) {
-    ElMessage.warning('請先創建分類（地盤 / 時間 / 事件原因）再上傳文件')
+    ElMessage.warning('請先到「系統設置 / 分類字典」創建分類再上傳文件')
     return
   }
-  uploadCategoryId.value = filterCategoryId.value
+  uploadCategoryId.value = filterCategoryId.value || categories.value[0].id
   uploadFileList.value = []
   uploadDialog.value = true
 }
@@ -150,7 +98,7 @@ function onFileChange(_file: UploadFile, fileList: UploadFiles) {
   uploadFileList.value = fileList
 }
 
-async function doUpload(_options: UploadRequestOptions) {
+function doUpload(_options: UploadRequestOptions) {
   /* 自定義上傳在 confirmUpload 統一處理，不走 el-upload 默認行為 */
 }
 
@@ -170,13 +118,14 @@ async function confirmUpload() {
     if (ok > 0) {
       ElMessage.success(`${ok} 個文件上傳成功`)
       uploadDialog.value = false
-      await Promise.all([fetchCategories(), fetchFiles()])
+      await fetchFiles()
     }
   } finally {
     uploading.value = false
   }
 }
 
+// ---------- 刪除 / 下載 ----------
 async function removeFile(row: FileDto) {
   await ElMessageBox.confirm(`確定刪除文件「${row.originalName}」嗎？物理文件將一併刪除。`, '危險操作', {
     confirmButtonText: '刪除',
@@ -187,7 +136,7 @@ async function removeFile(row: FileDto) {
   try {
     await deleteFile(row.id)
     ElMessage.success('已刪除')
-    await Promise.all([fetchCategories(), fetchFiles()])
+    await fetchFiles()
   } catch {
     /* 攔截器已提示 */
   }
@@ -201,6 +150,76 @@ async function handleDownload(row: FileDto) {
   }
 }
 
+// ---------- 圖片預覽 ----------
+const previewVisible = ref(false)
+const previewUrls = ref<string[]>([])
+const previewIndex = ref(0)
+const previewLoading = ref(false)
+
+const imageFiles = computed(() => files.value.filter((f) => fileTypeInfo(f.contentType, f.originalName).type === 'image'))
+
+async function openPreview(target: FileDto) {
+  const images = imageFiles.value
+  if (images.length === 0) return
+  previewLoading.value = true
+  previewVisible.value = true
+  try {
+    // 加載所有圖片的 object URL（用於查看器切換）
+    const urls = await Promise.all(images.map((f) => getFileBlob(f.id).then((b) => URL.createObjectURL(b))))
+    previewUrls.value = urls
+    previewIndex.value = Math.max(0, images.findIndex((f) => f.id === target.id))
+  } catch {
+    ElMessage.error('圖片加載失敗')
+    previewVisible.value = false
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+function closePreview() {
+  previewVisible.value = false
+  previewUrls.value.forEach((u) => URL.revokeObjectURL(u))
+  previewUrls.value = []
+}
+
+// ---------- 網格視圖縮略圖 ----------
+const thumbUrls = reactive<Record<string, string>>({})
+
+watch(
+  [viewMode, files],
+  async ([mode]) => {
+    if (mode !== 'grid') return
+    // 僅加載圖片縮略圖
+    const pending = files.value.filter(
+      (f) => fileTypeInfo(f.contentType, f.originalName).type === 'image' && !thumbUrls[f.id],
+    )
+    for (const f of pending) {
+      try {
+        const blob = await getFileBlob(f.id)
+        thumbUrls[f.id] = URL.createObjectURL(blob)
+      } catch {
+        /* 忽略單個失敗 */
+      }
+    }
+  },
+  { immediate: true },
+)
+
+function clearThumbs() {
+  Object.values(thumbUrls).forEach((u) => URL.revokeObjectURL(u))
+  Object.keys(thumbUrls).forEach((k) => delete thumbUrls[k])
+}
+
+watch(filterCategoryId, () => {
+  clearThumbs()
+  fetchFiles()
+})
+
+onBeforeUnmount(() => {
+  clearThumbs()
+  previewUrls.value.forEach((u) => URL.revokeObjectURL(u))
+})
+
 onMounted(async () => {
   await fetchCategories()
   await fetchFiles()
@@ -209,80 +228,61 @@ onMounted(async () => {
 
 <template>
   <div class="storage-view">
-    <!-- 分類字典 -->
-    <div class="mc-card section">
-      <div class="section-header">
-        <div>
-          <h2 class="section-title">分類字典</h2>
-          <p class="section-desc">維護文件歸檔分類：哪個地盤、時間、事件原因</p>
-        </div>
-        <el-button type="primary" @click="openCategoryCreate">
-          <el-icon style="margin-right: 6px"><AppIcon name="plus" :size="14" /></el-icon>
-          新建分類
-        </el-button>
+    <!-- 頁頭 -->
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">地盤文件</h1>
+        <p class="page-desc">上傳地盤照片與文件，按系統分類字典歸檔到對應地盤與事件</p>
       </div>
-
-      <el-table v-loading="categoryLoading" :data="categories" stripe>
-        <el-table-column label="地盤" prop="siteName" min-width="140" />
-        <el-table-column label="時間" width="120">
-          <template #default="{ row }">
-            <span class="num">{{ formatDate(row.eventDate) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="事件原因" prop="eventReason" min-width="180" />
-        <el-table-column label="備註" min-width="140">
-          <template #default="{ row }">{{ row.remark ?? '—' }}</template>
-        </el-table-column>
-        <el-table-column label="文件數" width="90" align="center">
-          <template #default="{ row }">
-            <el-tag effect="plain" round>{{ row.fileCount }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="130" align="center">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="openCategoryEdit(row)">編輯</el-button>
-            <el-button link type="danger" @click="removeCategory(row)">刪除</el-button>
-          </template>
-        </el-table-column>
-        <template #empty>
-          <el-empty description="暫無分類，請先創建" :image-size="72" />
-        </template>
-      </el-table>
+      <el-button type="primary" @click="openUpload">
+        <el-icon style="margin-right: 6px"><AppIcon name="construction" :size="14" /></el-icon>
+        上傳文件
+      </el-button>
     </div>
 
-    <!-- 文件列表 -->
-    <div class="mc-card section">
-      <div class="section-header">
-        <div>
-          <h2 class="section-title">地盤文件</h2>
-          <p class="section-desc">上傳照片 / 文件，按分類歸檔到對應地盤與事件</p>
-        </div>
-        <div class="file-actions">
-          <el-select
-            v-model="filterCategoryId"
-            placeholder="按分類篩選"
-            clearable
-            style="width: 220px"
-            @change="fetchFiles"
-          >
-            <el-option
-              v-for="c in filterCategories"
-              :key="c.id"
-              :value="c.id"
-              :label="`${c.siteName} · ${formatDate(c.eventDate)} · ${c.eventReason}`"
-            />
-          </el-select>
-          <el-button type="primary" @click="openUpload">
-            <el-icon style="margin-right: 6px"><AppIcon name="construction" :size="14" /></el-icon>
-            上傳文件
-          </el-button>
-        </div>
-      </div>
+    <!-- 工具欄 -->
+    <div class="toolbar mc-card">
+      <el-select
+        v-model="filterCategoryId"
+        placeholder="按分類篩選"
+        clearable
+        style="width: 280px"
+        @change="fetchFiles"
+      >
+        <el-option
+          v-for="c in categories"
+          :key="c.id"
+          :value="c.id"
+          :label="categoryLabel(c)"
+        />
+      </el-select>
 
+      <div class="toolbar-spacer" />
+
+      <el-radio-group v-model="viewMode" size="default">
+        <el-radio-button value="list">列表</el-radio-button>
+        <el-radio-button value="grid">網格</el-radio-button>
+      </el-radio-group>
+    </div>
+
+    <!-- 列表視圖 -->
+    <div v-show="viewMode === 'list'" class="mc-card table-card">
       <el-table v-loading="fileLoading" :data="files" stripe>
-        <el-table-column label="文件名" prop="originalName" min-width="220" show-overflow-tooltip />
+        <el-table-column label="文件名" min-width="240" show-overflow-tooltip>
+          <template #default="{ row }">
+            <div class="file-name-cell">
+              <AppIcon :name="fileTypeInfo(row.contentType, row.originalName).icon" :size="18" class="file-type-icon" />
+              <span>{{ row.originalName }}</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="地盤" prop="siteName" min-width="120" />
         <el-table-column label="事件原因" prop="eventReason" min-width="160" />
+        <el-table-column label="類型" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag effect="plain" round>{{ fileTypeInfo(row.contentType, row.originalName).label }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="大小" width="100">
           <template #default="{ row }">
             <span class="num">{{ formatSize(row.sizeBytes) }}</span>
@@ -296,8 +296,14 @@ onMounted(async () => {
             <span class="num">{{ formatDate(row.createdAt) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="130" align="center">
+        <el-table-column label="操作" width="160" align="center">
           <template #default="{ row }">
+            <el-button
+              v-if="fileTypeInfo(row.contentType, row.originalName).type === 'image'"
+              link
+              type="primary"
+              @click="openPreview(row)"
+            >預覽</el-button>
             <el-button link type="primary" @click="handleDownload(row)">下載</el-button>
             <el-button link type="danger" @click="removeFile(row)">刪除</el-button>
           </template>
@@ -308,29 +314,37 @@ onMounted(async () => {
       </el-table>
     </div>
 
-    <!-- 分類編輯 -->
-    <el-dialog v-model="categoryDialog" :title="editingId ? '編輯分類' : '新建分類'" width="460px" :close-on-click-modal="false">
-      <el-form ref="categoryFormRef" :model="categoryForm" :rules="categoryRules" label-position="top">
-        <el-form-item label="地盤" prop="siteName">
-          <el-input v-model="categoryForm.siteName" placeholder="如：將軍澳地盤" />
-        </el-form-item>
-        <el-form-item label="時間" prop="eventDate">
-          <el-date-picker v-model="categoryForm.eventDate" type="date" value-format="YYYY-MM-DD" placeholder="選擇日期" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="事件原因" prop="eventReason">
-          <el-input v-model="categoryForm.eventReason" placeholder="如：混凝土澆築驗收" />
-        </el-form-item>
-        <el-form-item label="備註" prop="remark">
-          <el-input v-model="categoryForm.remark" type="textarea" :rows="2" placeholder="可選" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="categoryDialog = false">取消</el-button>
-        <el-button type="primary" :loading="categorySubmitting" @click="submitCategory">
-          {{ editingId ? '保存' : '創建' }}
-        </el-button>
+    <!-- 網格視圖 -->
+    <div v-show="viewMode === 'grid'" v-loading="fileLoading" class="grid-view">
+      <template v-if="files.length > 0">
+        <div v-for="f in files" :key="f.id" class="file-card mc-card" :class="{ 'is-image': fileTypeInfo(f.contentType, f.originalName).type === 'image' }">
+          <div class="card-thumb" @click="fileTypeInfo(f.contentType, f.originalName).type === 'image' && openPreview(f)">
+            <template v-if="fileTypeInfo(f.contentType, f.originalName).type === 'image'">
+              <img v-if="thumbUrls[f.id]" :src="thumbUrls[f.id]" :alt="f.originalName" />
+              <div v-else class="thumb-loading">
+                <el-icon class="is-loading"><AppIcon name="refresh-cw" :size="22" /></el-icon>
+              </div>
+            </template>
+            <template v-else>
+              <AppIcon :name="fileTypeInfo(f.contentType, f.originalName).icon" :size="40" class="file-big-icon" />
+            </template>
+          </div>
+          <div class="card-body">
+            <div class="card-name" :title="f.originalName">{{ f.originalName }}</div>
+            <div class="card-meta">
+              <span>{{ f.siteName }}</span>
+              <span class="dot">·</span>
+              <span class="num">{{ formatSize(f.sizeBytes) }}</span>
+            </div>
+            <div class="card-actions">
+              <el-button link type="primary" @click="handleDownload(f)">下載</el-button>
+              <el-button link type="danger" @click="removeFile(f)">刪除</el-button>
+            </div>
+          </div>
+        </div>
       </template>
-    </el-dialog>
+      <el-empty v-else description="暫無文件，點擊「上傳文件」歸檔地盤照片" :image-size="72" />
+    </div>
 
     <!-- 上傳 -->
     <el-dialog v-model="uploadDialog" title="上傳文件" width="520px" :close-on-click-modal="false">
@@ -341,7 +355,7 @@ onMounted(async () => {
               v-for="c in categories"
               :key="c.id"
               :value="c.id"
-              :label="`${c.siteName} · ${formatDate(c.eventDate)} · ${c.eventReason}`"
+              :label="categoryLabel(c)"
             />
           </el-select>
         </el-form-item>
@@ -369,6 +383,19 @@ onMounted(async () => {
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 圖片預覽 -->
+    <el-dialog v-model="previewVisible" title="圖片預覽" width="80vw" top="6vh" :close-on-click-modal="false" @close="closePreview">
+      <div v-loading="previewLoading" class="preview-wrap">
+        <el-image-viewer
+          v-if="previewUrls.length > 0"
+          :url-list="previewUrls"
+          :initial-index="previewIndex"
+          hide-on-click-modal
+          @close="closePreview"
+        />
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -376,39 +403,134 @@ onMounted(async () => {
 .storage-view {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
 
-.section {
-  padding: 20px;
-}
-
-.section-header {
+.page-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
 }
 
-.section-title {
+.page-title {
   margin: 0 0 4px;
   font-size: 18px;
   font-weight: 500;
 }
 
-.section-desc {
+.page-desc {
   margin: 0;
   color: var(--mc-text-secondary);
-  font-size: 13px;
 }
 
-.file-actions {
+.toolbar {
   display: flex;
+  align-items: center;
   gap: 12px;
+  padding: 12px 16px;
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.table-card {
+  padding: 8px 0 0;
+}
+
+.file-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-type-icon {
+  color: var(--mc-primary);
   flex: none;
 }
 
+/* 網格視圖 */
+.grid-view {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.file-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  cursor: default;
+}
+
+.file-card.is-image .card-thumb {
+  cursor: pointer;
+}
+
+.card-thumb {
+  height: 150px;
+  background: var(--mc-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+
+.card-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.2s ease;
+}
+
+.file-card.is-image:hover .card-thumb img {
+  transform: scale(1.04);
+}
+
+.thumb-loading {
+  color: var(--mc-text-secondary);
+}
+
+.file-big-icon {
+  color: var(--mc-text-secondary);
+  opacity: 0.5;
+}
+
+.card-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.card-name {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-meta {
+  font-size: 12px;
+  color: var(--mc-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.card-meta .dot {
+  opacity: 0.5;
+}
+
+.card-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+/* 上傳 */
 .upload-dragger {
   display: flex;
   flex-direction: column;
@@ -426,5 +548,17 @@ onMounted(async () => {
 .upload-sub {
   margin: 4px 0 0;
   font-size: 12px;
+}
+
+/* 預覽 */
+.preview-wrap {
+  min-height: 300px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-wrap :deep(.el-image-viewer__img) {
+  max-height: 78vh;
 }
 </style>
