@@ -5,6 +5,8 @@ using MC.Erp.Data;
 using MC.Erp.Features.Identity.Endpoints;
 using MC.Erp.Features.Identity.Repositories;
 using MC.Erp.Features.Identity.Services;
+using MC.Erp.Features.Storage.Endpoints;
+using MC.Erp.Features.Storage.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Hangfire;
 using Hangfire.PostgreSql;
@@ -64,6 +66,12 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<RoleService>();
 
+// Storage 模組
+builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection("Storage"));
+builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
+builder.Services.AddScoped<CategoryService>();
+builder.Services.AddScoped<FileService>();
+
 // Hangfire
 builder.Services.AddHangfire(config => config
     .UsePostgreSqlStorage(o => o.UseNpgsqlConnection(builder.Configuration.GetConnectionString("Default"))));
@@ -75,6 +83,9 @@ builder.Services.AddHealthChecks()
 
 // OpenAPI
 builder.Services.AddOpenApi();
+
+// 統一異常處理（ProblemDetails, RFC 9457）
+builder.Services.AddProblemDetails();
 
 var app = builder.Build();
 
@@ -97,6 +108,7 @@ if (app.Environment.IsDevelopment())
 
 // 端點
 app.MapIdentityEndpoints();
+app.MapStorageEndpoints();
 
 // 初始化種子數據
 await app.Services.InitializeSeedDataAsync();

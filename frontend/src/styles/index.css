@@ -1,0 +1,152 @@
+/* MC ERP 主題 — 依據 specs/design-system.md，全部色值走這裡的變量 */
+
+:root {
+  /* 主色（工程藍） */
+  --mc-primary: #1D5BBF;
+  --mc-primary-light: #2E73E8;
+  --mc-primary-bg: #E8F0FC;
+
+  /* 背景 */
+  --mc-bg: #F5F7FA;
+  --mc-card: #FFFFFF;
+  --mc-sidebar: #1B2432;
+
+  /* 文本 */
+  --mc-text: #1F2937;
+  --mc-text-secondary: #6B7280;
+  --mc-sidebar-text: #C9D4E4;
+
+  /* 功能色 */
+  --mc-success: #18A058;
+  --mc-warning: #E6A23C;
+  --mc-danger: #D9363E;
+
+  /* 邊框 / 圓角 */
+  --mc-border: #E5E7EB;
+  --mc-radius: 8px;
+
+  /* Element Plus 變量映射 */
+  --el-color-primary: var(--mc-primary);
+  --el-color-primary-light-3: #5C8AD9;
+  --el-color-primary-light-5: #8FAEE4;
+  --el-color-primary-light-7: #C4D6F2;
+  --el-color-primary-light-8: var(--mc-primary-bg);
+  --el-color-primary-light-9: #F0F5FD;
+  --el-color-primary-dark-2: #16497F;
+  --el-color-success: var(--mc-success);
+  --el-color-warning: var(--mc-warning);
+  --el-color-danger: var(--mc-danger);
+  --el-border-radius-base: var(--mc-radius);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family:
+    'PingFang SC',
+    'PingFang HK',
+    'Microsoft YaHei',
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  font-size: 14px;
+  color: var(--mc-text);
+  background: var(--mc-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 數字等寬對齊（金額 / 日期 / 工時） */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 通用卡片 */
+.mc-card {
+  background: var(--mc-card);
+  border: 1px solid var(--mc-border);
+  border-radius: var(--mc-radius);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.mc-card--hover:hover {
+  box-shadow: 0 8px 24px rgb(29 91 191 / 12%);
+  transform: translateY(-2px);
+}
+
+/* 深色側邊欄菜單 */
+.mc-menu {
+  background: transparent;
+  border-right: none;
+}
+
+.mc-menu .el-menu-item {
+  height: 48px;
+  margin: 4px 12px;
+  border-radius: 6px;
+  color: var(--mc-sidebar-text);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.mc-menu .el-menu-item:hover {
+  background: rgb(255 255 255 / 6%);
+  color: #fff;
+}
+
+.mc-menu .el-menu-item.is-active {
+  background: rgb(46 115 232 / 20%);
+  color: #fff;
+  position: relative;
+}
+
+.mc-menu .el-menu-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--mc-primary-light);
+}
+
+/* 路由切換淡入 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* 尊重減少動效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* 細滾動條 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}

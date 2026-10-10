@@ -1,5 +1,6 @@
 using MC.Erp.Features.Attendance.Entities;
 using MC.Erp.Features.Identity.Entities;
+using MC.Erp.Features.Storage.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace MC.Erp.Data;
@@ -18,6 +19,10 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
     public DbSet<Site> Sites => Set<Site>();
     public DbSet<AttendanceRecord> AttendanceRecords => Set<AttendanceRecord>();
     public DbSet<MonthlyWorkSummary> MonthlyWorkSummaries => Set<MonthlyWorkSummary>();
+
+    // Storage
+    public DbSet<StorageCategory> StorageCategories => Set<StorageCategory>();
+    public DbSet<FileItem> FileItems => Set<FileItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -76,7 +81,7 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
                 .WithOne(r => r.Worker)
                 .HasForeignKey(r => r.WorkerId);
             e.HasMany(w => w.Summaries)
-                .WithOne()
+                .WithOne(s => s.Worker)
                 .HasForeignKey(s => s.WorkerId);
         });
 
@@ -100,6 +105,25 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
         {
             e.ToTable("attendance_monthly_summaries");
             e.HasIndex(s => new { s.WorkerId, s.Year, s.Month }).IsUnique();
+        });
+
+        // Storage 模組
+        modelBuilder.Entity<StorageCategory>(e =>
+        {
+            e.ToTable("storage_categories");
+            e.HasQueryFilter(c => !c.IsDeleted);
+            e.HasIndex(c => c.SiteName);
+            e.HasMany(c => c.Files)
+                .WithOne(f => f.Category)
+                .HasForeignKey(f => f.CategoryId);
+        });
+
+        modelBuilder.Entity<FileItem>(e =>
+        {
+            e.ToTable("storage_files");
+            e.HasQueryFilter(f => !f.IsDeleted);
+            e.HasIndex(f => f.CategoryId);
+            e.HasIndex(f => f.CreatedAt);
         });
     }
 }

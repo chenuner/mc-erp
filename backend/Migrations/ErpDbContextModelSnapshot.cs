@@ -22,6 +22,171 @@ namespace MC.Erp.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.AttendanceRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ClockInTime")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ClockOutTime")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsLaborLeave")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("OvertimeHours")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Remark")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("SiteId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("WorkerId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SiteId");
+
+                    b.HasIndex("WorkerId", "ClockInTime");
+
+                    b.ToTable("attendance_records", (string)null);
+                });
+
+            modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.MonthlyWorkSummary", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("ActualPay")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("DailyWage")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("LaborLeaveDays")
+                        .HasColumnType("numeric");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("MpfEmployee")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("MpfEmployer")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("OvertimeAmount")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("OvertimeHours")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Remark")
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("TotalAmount")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("TotalWorkDays")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("WorkDays")
+                        .HasColumnType("numeric");
+
+                    b.Property<Guid>("WorkerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkerId", "Year", "Month")
+                        .IsUnique();
+
+                    b.ToTable("attendance_monthly_summaries", (string)null);
+                });
+
+            modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.Site", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Address")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name");
+
+                    b.ToTable("attendance_sites", (string)null);
+                });
+
+            modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.Worker", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("DailyWage")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EmployeeId")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.ToTable("attendance_workers", (string)null);
+                });
+
             modelBuilder.Entity("MC.Erp.Features.Identity.Entities.Permission", b =>
                 {
                     b.Property<Guid>("Id")
@@ -163,6 +328,126 @@ namespace MC.Erp.Migrations
                     b.ToTable("identity_user_roles", (string)null);
                 });
 
+            modelBuilder.Entity("MC.Erp.Features.Storage.Entities.FileItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CategoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("OriginalName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("StoredName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UploaderId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("UploaderName")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CategoryId");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.ToTable("storage_files", (string)null);
+                });
+
+            modelBuilder.Entity("MC.Erp.Features.Storage.Entities.StorageCategory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("EventDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EventReason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Remark")
+                        .HasColumnType("text");
+
+                    b.Property<string>("SiteName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SiteName");
+
+                    b.ToTable("storage_categories", (string)null);
+                });
+
+            modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.AttendanceRecord", b =>
+                {
+                    b.HasOne("MC.Erp.Features.Attendance.Entities.Site", "Site")
+                        .WithMany("Records")
+                        .HasForeignKey("SiteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("MC.Erp.Features.Attendance.Entities.Worker", "Worker")
+                        .WithMany("Records")
+                        .HasForeignKey("WorkerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Site");
+
+                    b.Navigation("Worker");
+                });
+
+            modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.MonthlyWorkSummary", b =>
+                {
+                    b.HasOne("MC.Erp.Features.Attendance.Entities.Worker", "Worker")
+                        .WithMany("Summaries")
+                        .HasForeignKey("WorkerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Worker");
+                });
+
             modelBuilder.Entity("MC.Erp.Features.Identity.Entities.RolePermission", b =>
                 {
                     b.HasOne("MC.Erp.Features.Identity.Entities.Permission", "Permission")
@@ -201,6 +486,29 @@ namespace MC.Erp.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("MC.Erp.Features.Storage.Entities.FileItem", b =>
+                {
+                    b.HasOne("MC.Erp.Features.Storage.Entities.StorageCategory", "Category")
+                        .WithMany("Files")
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Category");
+                });
+
+            modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.Site", b =>
+                {
+                    b.Navigation("Records");
+                });
+
+            modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.Worker", b =>
+                {
+                    b.Navigation("Records");
+
+                    b.Navigation("Summaries");
+                });
+
             modelBuilder.Entity("MC.Erp.Features.Identity.Entities.Permission", b =>
                 {
                     b.Navigation("RolePermissions");
@@ -216,6 +524,11 @@ namespace MC.Erp.Migrations
             modelBuilder.Entity("MC.Erp.Features.Identity.Entities.User", b =>
                 {
                     b.Navigation("UserRoles");
+                });
+
+            modelBuilder.Entity("MC.Erp.Features.Storage.Entities.StorageCategory", b =>
+                {
+                    b.Navigation("Files");
                 });
 #pragma warning restore 612, 618
         }

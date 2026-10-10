@@ -29,6 +29,7 @@ MC ERP — 香港建築管理公司 ERP 系統。簡單系統，不過度工程�
 |--------|--------|
 | 能用什麼技術 | [specs/tech-stack.md](specs/tech-stack.md) |
 | 代碼寫在哪、怎麼分層 | [specs/architecture.md](specs/architecture.md) |
+| 前端長什麼樣 | [specs/design-system.md](specs/design-system.md) |
 | 項目概覽和快速開始 | [README.md](README.md) |
 
 ---

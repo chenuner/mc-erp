@@ -37,7 +37,7 @@ public static class AttendanceEndpoints
     private static async Task<Ok<List<WorkerDto>>> ListWorkersAsync(AttendanceServices svc, CancellationToken ct)
     {
         var workers = await svc.GetWorkersAsync(ct);
-        return TypedResults.Ok(workers);
+        return TypedResults.Ok(workers.Select(WorkerDto.From).ToList());
     }
 
     private static async Task<Created<WorkerDto>> CreateWorkerAsync(
@@ -58,7 +58,7 @@ public static class AttendanceEndpoints
     private static async Task<Ok<List<SiteDto>>> ListSitesAsync(AttendanceServices svc, CancellationToken ct)
     {
         var sites = await svc.GetSitesAsync(ct);
-        return TypedResults.Ok(sites);
+        return TypedResults.Ok(sites.Select(SiteDto.From).ToList());
     }
 
     private static async Task<Created<SiteDto>> CreateSiteAsync(
@@ -75,7 +75,7 @@ public static class AttendanceEndpoints
         var to = end ?? DateTime.UtcNow;
         var from = start ?? to.AddDays(-30);
         var records = await svc.GetRecordsAsync(workerId, from, to, ct);
-        return TypedResults.Ok(records);
+        return TypedResults.Ok(records.Select(RecordDto.From).ToList());
     }
 
     // --- 月結 ---
@@ -83,7 +83,7 @@ public static class AttendanceEndpoints
         int year, int month, AttendanceServices svc, CancellationToken ct)
     {
         var summaries = await svc.GetSummariesAsync(year, month, ct);
-        return TypedResults.Ok(summaries);
+        return TypedResults.Ok(summaries.Select(SummaryDto.From).ToList());
     }
 
     private static async Task<Results<Ok<SummaryDto>, NotFound>> GetWorkerSummaryAsync(
@@ -117,7 +117,10 @@ public sealed record SiteDto(Guid Id, string Name, string? Address, bool IsActiv
 {
     public static SiteDto From(Site s) => new(s.Id, s.Name, s.Address, s.IsActive);
 }
-public sealed record RecordDto(Guid Id, Guid WorkerId, Guid SiteId, DateTime ClockInTime, DateTime? ClockOutTime, decimal OvertimeHours, bool IsLaborLeave, string? Remark);
+public sealed record RecordDto(Guid Id, Guid WorkerId, Guid SiteId, DateTime ClockInTime, DateTime? ClockOutTime, decimal OvertimeHours, bool IsLaborLeave, string? Remark)
+{
+    public static RecordDto From(AttendanceRecord r) => new(r.Id, r.WorkerId, r.SiteId, r.ClockInTime, r.ClockOutTime, r.OvertimeHours, r.IsLaborLeave, r.Remark);
+}
 public sealed record SummaryDto(Guid Id, Guid WorkerId, int Year, int Month, decimal WorkDays, decimal LaborLeaveDays, decimal TotalWorkDays, decimal OvertimeHours, decimal DailyWage, decimal OvertimeAmount, decimal MpfEmployer, decimal MpfEmployee, decimal ActualPay, decimal TotalAmount, string? Remark)
 {
     public static SummaryDto From(MonthlyWorkSummary s) => new(s.Id, s.WorkerId, s.Year, s.Month, s.WorkDays, s.LaborLeaveDays, s.TotalWorkDays, s.OvertimeHours, s.DailyWage, s.OvertimeAmount, s.MpfEmployer, s.MpfEmployee, s.ActualPay, s.TotalAmount, s.Remark);

@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      - "5433:5432"  # 宿主机 5432 被本機 PostgreSQL 18 服務佔用，改用 5433
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

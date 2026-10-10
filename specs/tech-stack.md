@@ -100,6 +100,7 @@
 | Element Plus | 最新 | ✅ 已採納 | UI 組件庫（唯一 UI 庫，禁止第二個） |
 | Axios | 最新 | ✅ 已採納 | HTTP 客戶端 |
 | @vueuse/core | 最新 | ✅ 已採納 | 組合式工具集 |
+| ECharts | 最新 | ✅ 已採納 | 圖表庫（唯一，用法遵循 specs/design-system.md 圖表規範） |
 
 ### 工程化
 

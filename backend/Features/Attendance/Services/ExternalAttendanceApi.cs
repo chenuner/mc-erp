@@ -4,9 +4,9 @@ using Microsoft.Extensions.Logging;
 namespace MC.Erp.Features.Attendance.Services;
 
 /// <summary>
-/// 外部考勤 API 實現（待對接真實接口後替換）
+/// 外部考勤 API 實現（待對接真實接口後替換，屆時再注入 IHttpClientFactory）
 /// </summary>
-public sealed class ExternalAttendanceApi(IHttpClientFactory httpClientFactory, ILogger<ExternalAttendanceApi> logger) : IExternalAttendanceApi
+public sealed class ExternalAttendanceApi(ILogger<ExternalAttendanceApi> logger) : IExternalAttendanceApi
 {
     public async Task<List<ExternalAttendanceRecord>> FetchRecordsAsync(DateTime start, DateTime end, CancellationToken ct = default)
     {
