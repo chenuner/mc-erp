@@ -1,109 +1,117 @@
-# architecture.md — 架构规范
+# architecture.md — 架構規範
 
-> 决定"写在哪"。分层、模块边界、依赖流向、物理结构。
-
----
-
-## 总体架构
-
-模块化单体（Modular Monolith）+ 领域驱动设计（DDD）+ CQRS。
-
-每个模块是独立的业务域，有自己的 Domain / Application / Infrastructure / API 四层，通过 Contracts 层与其他模块通信。
+> 決定"寫在哪"。分層、模組邊界、依賴流向、物理結構。
+>
+> 原則：**簡單分層，夠用就好。**
 
 ---
 
-## 分层架构
+## 命名規範
 
-```
-┌─────────────────────────────────┐
-│          API 层（端点）          │  ← HTTP 请求入口，薄，只做参数绑定和响应
-├─────────────────────────────────┤
-│      Application 层（用例）      │  ← Command/Query/Handler，业务流程编排
-├─────────────────────────────────┤
-│       Domain 层（领域核心）      │  ← 实体 / 值对象 / 仓储接口 / 领域服务
-├─────────────────────────────────┤
-│    Infrastructure 层（实现）     │  ← EF Core / 仓储实现 / 外部服务 / 缓存
-└─────────────────────────────────┘
-```
+| 層 | 規則 | 說明 |
+|---|------|------|
+| 基礎設施（Common/ + Identity） | 英文命名 | 通用組件，方便複用，遵循 .NET 慣例 |
+| 業務模組（Attendance / Accounting / Storage） | 允許中文方法名、中文變量名 | 業務邏輯用中文更清晰，降低溝通成本 |
 
-### 依赖规则（严格执行）
-
-1. **Domain 层不依赖任何其他层** — 纯业务逻辑，无基础设施依赖
-2. **Application 层依赖 Domain 层** — 调用领域对象和仓储接口
-3. **Infrastructure 层依赖 Domain + Application** — 实现仓储接口和外部服务
-4. **API 层依赖 Application + Contracts** — 只做 HTTP 适配
-
-### Contracts 层
-
-Contracts 是模块对外暴露的公共契约，其他模块只能引用 Contracts，不能直接引用 Domain / Infrastructure。
-
-```
-Contracts/
-├── Dto/       # 数据传输对象
-├── Events/    # 领域事件（其他模块可以订阅）
-├── Queries/   # 查询接口（其他模块可以调用）
-└── Commands/  # 命令接口（其他模块可以调用，谨慎使用）
-```
+> Identity 視為基礎設施，是通用體系，用英文。業務代碼用中文方便為主，不求統一風格。
 
 ---
 
-## 模块边界
+## 總體架構
 
-### 模块清单
+簡單分層架構（Layered Architecture），單項目多模組。
 
-| 模块 | 职责 | 核心聚合 |
+不用 DDD 聚合根、不用 CQRS、不用 Contracts 層。模組間可直接調用 Service 接口。
+
+---
+
+## 分層結構
+
+```
+┌─────────────────────────────┐
+│      API 層（Endpoints）     │  ← HTTP 入口，薄：參數綁定 + 調 Service
+├─────────────────────────────┤
+│    Application 層（Service）  │  ← 業務邏輯編排，調 Repository / 外部 API
+├─────────────────────────────┤
+│   Infrastructure 層（實現）   │  ← EF Core Repository / HttpClient / Hangfire
+└─────────────────────────────┘
+```
+
+### 依賴規則
+
+1. **API 層依賴 Application 層** — 只做 HTTP 適配，調 Service
+2. **Application 層依賴 Domain 層（實體）** — 業務邏輯在這裡
+3. **Infrastructure 層實現 Application 層定義的接口** — 依賴注入反轉
+4. **CancellationToken 在 Infrastructure 層處理** — 業務代碼不需要關注
+
+---
+
+## 模組清單
+
+| 模組 | 職責 | 核心實體 |
 |------|------|---------|
-| Account | 用户、认证（JWT/密码/第三方登录）、提现收款账号（AES 加密） | User / ThirdPartyIdentity / WithdrawalAccount |
-| Administration | 系统管理、字典、敏感词、系统参数 | BannedWord / DictionaryItem / SystemParameter |
-| SystemConfigs | 系统配置 | SystemConfig |
+| **Identity** | 用戶、角色、權限、JWT 認證、密碼哈希 | User / Role / Permission / UserRole |
+| **Attendance** | 外部打卡數據拉取、工數統計、薪酬計算（MPF/OT）、月結報表 | AttendanceRecord / MonthlyWorkSummary / Worker |
+| **Accounting** | 收據拍照上傳、OCR 識別、支出按地盤分類、年度提取 | Receipt / ExpenseCategory / Site |
+| **Storage** | 雲盤文件管理、地盤照片存儲、按地盤/時間/事件分類、賬戶權限。文件存儲抽象為 `IFileStorage` 接口，MVP 階段用本地存儲實現，跑通後換對象存儲只需換實現 | FileItem / FilePermission / SitePhoto |
 
+### 模組間通信
 
-### 模块间通信规则
+1. **直接調用 Service 接口** — 簡單系統，不走消息總線
+2. **跨模組只調 Application 層接口** — 不直接操作對方的 Repository
+3. **共享通用組件** — 所有模組用 Common/ 下的基礎設施
 
-1. **只能通过 Contracts 层通信** — 禁止直接引用其他模块的 Domain / Infrastructure
-2. **查询用 Queries 接口** — 其他模块的只读查询通过 `I*Queries` 接口
-3. **写操作用领域事件** — 模块间通过发布/订阅领域事件解耦
-4. **禁止跨模块直接修改数据** — 只能通过对方模块暴露的 Command 接口（极少用）
-5. **禁止循环依赖** — A → B → A 是不允许的
+---
 
-
-
-
-
-
-## 物理目录结构
+## 物理目錄結構
 
 ```
 backend/
-├── AIO.csproj          # 主项目（单项目多模块）
-├── Program.cs              # 入口
-├── appsettings.json        # 配置
-├── BuildingBlocks/         # 公共基础设施
-│   ├── Domain/             # 领域基类：Entity / AggregateRoot / IDomainEvent 等
-│   ├── Application/        # 应用基类：PagedQuery / PagedResult 等
-│   ├── Aop/                # 横切关注点：身份认证、权限检查，要可以user.id直接获取用户信息
-│   ├── Middleware/         # 中间件：DomainExceptionHandler 等
-│   └── Infrastructure/     # 基础设施基类：EF Core 仓储基类等
-├── Modules/                # 业务模块
-│   └── {ModuleName}/
-│       ├── API/
-│       ├── Application/
-│       ├── Contracts/
-│       ├── Domain/
-│       └── Infrastructure/
-└── tests/
-    └── Architecture.Tests/ # 架构测试
+├── MC.Erp.csproj
+├── Program.cs                  # 入口：DI 註冊 + Middleware + Endpoints
+├── appsettings.json            # 配置
+├── Common/                     # 公共基礎設施
+│   ├── Domain/                 # 基類：Entity / AuditableEntity
+│   ├── Infrastructure/         # EF Core 基類 / Repository 基類 / Middleware
+│   ├── Security/               # JWT / 認證擴展 / 當前用戶上下文
+│   └── Exceptions/             # 統一異常處理
+├── Features/                   # 業務模組
+│   ├── Identity/
+│   │   ├── Endpoints/         # 登錄 / 用戶 CRUD / 角色管理
+│   │   ├── Services/           # AuthService / UserService / RoleService
+│   │   ├── Entities/           # User / Role / Permission
+│   │   └── Repositories/       # IUserRepository
+│   ├── Attendance/
+│   │   ├── Endpoints/          # 工數查詢 / 月結報表
+│   │   ├── Services/           # AttendanceSyncService / PayrollService
+│   │   ├── Entities/           # AttendanceRecord / MonthlyWorkSummary / Worker
+│   │   ├── Repositories/       # IAttendanceRepository
+│   │   └── External/           # 外部打卡 API 客戶端
+│   ├── Accounting/
+│   │   ├── Endpoints/          # 收據上傳 / 支出查詢
+│   │   ├── Services/           # ReceiptService / OcrService
+│   │   ├── Entities/           # Receipt / ExpenseCategory
+│   │   └── Repositories/
+│   └── Storage/
+│       ├── Endpoints/          # 文件上傳下載 / 權限管理
+│       ├── Services/           # IFileStorage / LocalStorageProvider / FileService / SitePhotoService
+│       ├── Entities/           # FileItem / FilePermission / SitePhoto
+│       └── Repositories/
+└── Data/
+    └── ErpDbContext.cs         # 單一 DbContext，所有實體在這裡註冊
 
 frontend/
 ├── src/
-│   ├── api/                # API 调用
-│   ├── components/         # 通用组件
-│   ├── views/              # 页面
-│   ├── stores/             # Pinia stores
-│   ├── router/             # 路由
-│   ├── utils/              # 工具函数
-│   ├── composables/        # 组合式函数
-│   └── assets/             # 静态资源
+│   ├── api/                    # API 調用（Axios 封裝）
+│   ├── components/             # 通用組件
+│   ├── views/                  # 頁面
+│   ├── stores/                 # Pinia stores
+│   ├── router/                 # 路由
+│   ├── utils/                  # 工具函數
+│   ├── composables/            # 組合式函數
+│   ├── assets/                 # 靜態資源
+│   ├── App.vue
+│   └── main.ts
 ├── package.json
 ├── vite.config.ts
 └── tsconfig.json
@@ -111,38 +119,67 @@ frontend/
 
 ---
 
-## 数据库
+## 數據庫
 
-- 每个模块有自己的 DbContext
-- 所有表在同一个 PostgreSQL 数据库中
-- 表命名：`{module_}table_name`（下划线小写）
-- 主键：`Guid` 类型，字段名 `id`
-- 创建时间：`created_at`
-- 更新时间：`updated_at`
-- 软删除：`is_deleted` + `deleted_at`（聚合根如果需要）
-
----
-
-## API 规范
-
-- RESTful 风格
-- 路由前缀：`/api/{module}/{resource}`
-- 版本：URL 版本化（如 `/api/v1/orders`）
-- 统一返回格式：`TypedResults` + ProblemDetails（RFC 9457）
-- 分页：`page` + `pageSize` 参数，返回 `{ items, total, page, pageSize }`
-- 认证：Bearer JWT Token
-- 授权：`[Authorize]` + Policy
+- **單一 DbContext** — `ErpDbContext`，所有實體統一註冊
+- 所有表在同一個 PostgreSQL 數據庫中
+- 表命名：`{module_}table_name`（下劃線小寫），如 `identity_users`、`attendance_records`
+- 主鍵：`Guid` 類型，字段名 `id`
+- 審計字段：`created_at` / `updated_at`
+- 軟刪除：`is_deleted` + `deleted_at`（僅需要軟刪除的實體）
 
 ---
 
-## 架构演进状态
+## API 規範
 
-| 决策 | 状态 | ADR |
-|------|------|-----|
-| 模块化单体 | ✅ 已采纳 | - |
-| DDD 分层 | ✅ 已采纳 | - |
-| CQRS | ✅ 已采纳 | - |
-| Identity 合并到 Account | ✅ 已采纳 
-| 删除 WalletType 单钱包 | ⚠️ Phase 4 待执行 
-| WithdrawalAccount AES-GCM 加密 | ✅ 已采纳 
-| VSA（Vertical Slice Architecture） | ✅ 已采纳 
+- RESTful 風格
+- 路由前綴：`/api/{module}`，如 `/api/attendance`、`/api/accounting`
+- 統一返回：`TypedResults` + ProblemDetails（RFC 9457）
+- 分頁：`page` + `pageSize` 參數，返回 `{ items, total, page, pageSize }`
+- 認證：Bearer JWT Token
+- 授權：基於角色的 Policy，`[Authorize(Policy = "...")]`
+
+---
+
+## 認證 & 授權體系
+
+完整的 Role-User 體系：
+
+```
+User ─┬─ UserRole ── Role ── RolePermission ── Permission
+      │
+      └─ JWT Token（包含 userId, roles, permissions）
+```
+
+- **User** — 用戶賬號，Argon2id 密碼哈希
+- **Role** — 角色（如：管理員、會計、地盤主管、普通員工）
+- **Permission** — 權限項（如：attendance.view, accounting.edit）
+- **UserRole** — 用戶-角色多對多
+- **RolePermission** — 角色-權限多對多
+- **JWT** — 登錄後簽發，包含角色和權限信息
+- **CurrentUser 上下文** — 通過 ASP.NET Core 的 ClaimsPrincipal 獲取，業務代碼直接用
+
+---
+
+## 外部集成
+
+### 考勤打卡數據
+
+- 通過 `IHttpClientFactory` 調用外部考勤接口
+- Hangfire 定時任務拉取打卡數據
+- CancellationToken 在 Infrastructure 層統一處理
+- 拉取後存入 `attendance_records` 表，按月匯總計算薪酬
+
+### OCR 識別（會計收據）
+
+- 上傳收據照片後，調用外部 OCR 服務識別金額、日期等
+- 識別結果需要人工確認後入庫
+- 按地盤（Site）分類歸檔
+- OCR 服務待選型（Azure Cognitive Services / 雲廠商 API），接口抽象為 `IOcrService`
+
+### 文件存儲
+
+- `IFileStorage` 接口抽象文件讀寫，定義在 `Storage/Services/`
+- MVP 階段：`LocalStorageProvider` 實現，文件存本地磁盤
+- 未來：換 `S3StorageProvider` / `OssStorageProvider` 只需改 DI 註冊，業務代碼不動
+- 文件元數據（名稱、路徑、分類、權限）存數據庫，實際文件內容走 `IFileStorage`
