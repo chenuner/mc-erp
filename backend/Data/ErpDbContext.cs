@@ -130,6 +130,7 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
         modelBuilder.Entity<FileItem>(e =>
         {
             e.ToTable("storage_files");
+            e.Property(f => f.Md5).HasMaxLength(32);
             e.HasQueryFilter(f => !f.IsDeleted);
             e.HasIndex(f => f.CreatedAt);
             e.HasOne(f => f.TypeDict)

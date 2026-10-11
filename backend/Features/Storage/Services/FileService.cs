@@ -17,12 +17,14 @@ public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentU
         if (dict is null || !dict.Enabled)
             throw new InvalidOperationException("請選擇有效且啟用的文件類別");
 
+        var saved = await storage.SaveAsync(content, originalName, ct);
         var file = new FileItem
         {
             Type = dict.Id,
             TypeDict = dict,
             OriginalName = originalName,
-            StoredName = await storage.SaveAsync(content, originalName, ct),
+            StoredName = saved.StoredName,
+            Md5 = saved.Md5,
             ContentType = contentType,
             SizeBytes = sizeBytes,
             UploaderId = user.UserId,

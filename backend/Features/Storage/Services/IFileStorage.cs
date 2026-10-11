@@ -5,8 +5,8 @@ namespace MC.Erp.Features.Storage.Services;
 /// </summary>
 public interface IFileStorage
 {
-    /// <summary>保存文件，返回存儲名</summary>
-    Task<string> SaveAsync(Stream content, string originalName, CancellationToken ct);
+    /// <summary>保存文件，返回存儲名及內容 MD5</summary>
+    Task<(string StoredName, string Md5)> SaveAsync(Stream content, string originalName, CancellationToken ct);
 
     /// <summary>打開文件讀流（調用方負責 Dispose）</summary>
     Stream OpenRead(string storedName);

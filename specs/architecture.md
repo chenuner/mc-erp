@@ -183,3 +183,4 @@ User ─┬─ UserRole ── Role ── RolePermission ── Permission
 - MVP 階段：`LocalStorageProvider` 實現，文件存本地磁盤
 - 未來：換 `S3StorageProvider` / `OssStorageProvider` 只需改 DI 註冊，業務代碼不動
 - 文件元數據（名稱、路徑、分類、權限）存數據庫，實際文件內容走 `IFileStorage`
+- 上傳時流式計算 MD5，資料庫 `storage_files.Md5` 保存 32 位小寫十六進制摘要，不保存文件內容。歷史文件的 MD5 可為空；磁盤存儲名仍用 Guid，不按 MD5 去重。

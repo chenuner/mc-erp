@@ -347,6 +347,10 @@ namespace MC.Erp.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("Md5")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<string>("OriginalName")
                         .IsRequired()
                         .HasColumnType("text");

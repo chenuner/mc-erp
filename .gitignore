@@ -10,6 +10,9 @@
 logs/
 *.log
 
+# Uploaded files
+/backend/storage-files/
+
 # Environment
 .env
 .env.local

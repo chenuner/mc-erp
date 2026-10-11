@@ -1,4 +1,5 @@
 using System.IO;
+using System.Security.Cryptography;
 using Microsoft.Extensions.Options;
 
 namespace MC.Erp.Features.Storage.Services;
@@ -10,14 +11,17 @@ public sealed class LocalFileStorage(IOptions<StorageOptions> options) : IFileSt
 {
     private string RootPath => Path.GetFullPath(options.Value.RootPath);
 
-    public async Task<string> SaveAsync(Stream content, string originalName, CancellationToken ct)
+    public async Task<(string StoredName, string Md5)> SaveAsync(Stream content, string originalName, CancellationToken ct)
     {
         var storedName = $"{Guid.NewGuid():N}{SanitizeExtension(originalName)}";
         Directory.CreateDirectory(RootPath);
 
         await using var output = File.Create(Path.Combine(RootPath, storedName));
-        await content.CopyToAsync(output, ct);
-        return storedName;
+        using var md5 = MD5.Create();
+        await using var hashingStream = new CryptoStream(output, md5, CryptoStreamMode.Write, leaveOpen: true);
+        await content.CopyToAsync(hashingStream, ct);
+        await hashingStream.FlushFinalBlockAsync(ct);
+        return (storedName, Convert.ToHexStringLower(md5.Hash!));
     }
 
     public Stream OpenRead(string storedName)
