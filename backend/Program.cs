@@ -8,7 +8,6 @@ using MC.Erp.Features.Identity.Services;
 using MC.Erp.Features.Storage.Endpoints;
 using MC.Erp.Features.Storage.Services;
 using MC.Erp.Features.System.Endpoints;
-using MC.Erp.Features.System.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Hangfire;
 using Hangfire.PostgreSql;
@@ -61,17 +60,14 @@ builder.Services.AddSingleton<IPasswordHasher, PasswordHasher>();
 builder.Services.AddSingleton<IJwtTokenGenerator, JwtTokenGenerator>();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 
-// Identity 模組
+// Identity 模塊
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IRoleRepository, RoleRepository>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<RoleService>();
 
-// System 模組（歸檔分類字典）
-builder.Services.AddScoped<CategoryService>();
-
-// Storage 模組
+// Storage 模塊
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection("Storage"));
 builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
 builder.Services.AddScoped<FileService>();

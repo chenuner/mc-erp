@@ -1,6 +1,5 @@
 using MC.Erp.Features.Storage.Entities;
 using MC.Erp.Features.Storage.Services;
-using MC.Erp.Features.System.Entities;
 using Microsoft.AspNetCore.Http.HttpResults;
 
 namespace MC.Erp.Features.Storage.Endpoints;
@@ -21,14 +20,14 @@ public static class StorageEndpoints
     }
 
     private static async Task<Ok<List<FileDto>>> ListFilesAsync(
-        Guid? categoryId, FileService svc, CancellationToken ct)
+        FileService svc, CancellationToken ct)
     {
-        var items = await svc.列表Async(categoryId, ct);
-        return TypedResults.Ok(items.Select(x => FileDto.From(x.File, x.Category)).ToList());
+        var items = await svc.列表Async(ct);
+        return TypedResults.Ok(items.Select(FileDto.From).ToList());
     }
 
     private static async Task<Results<Created<FileDto>, BadRequest<string>>> UploadFileAsync(
-        Guid categoryId, IFormFile file, FileService svc, CancellationToken ct)
+        IFormFile file, FileService svc, CancellationToken ct)
     {
         if (file.Length == 0)
         {
@@ -38,8 +37,8 @@ public static class StorageEndpoints
         try
         {
             await using var stream = file.OpenReadStream();
-            var item = await svc.上传Async(categoryId, file.FileName, file.ContentType, file.Length, stream, ct);
-            return TypedResults.Created($"/api/storage/files/{item.Id}", FileDto.From(item, item.Category));
+            var item = await svc.上传Async(file.FileName, file.ContentType, file.Length, stream, ct);
+            return TypedResults.Created($"/api/storage/files/{item.Id}", FileDto.From(item));
         }
         catch (InvalidOperationException ex)
         {
@@ -66,10 +65,8 @@ public static class StorageEndpoints
 }
 
 public sealed record FileDto(
-    Guid Id, Guid CategoryId, string SiteName, DateTime EventDate, string EventReason,
-    string OriginalName, string ContentType, long SizeBytes, string? UploaderName, DateTime CreatedAt)
+    Guid Id, string OriginalName, string ContentType, long SizeBytes, string? UploaderName, DateTime CreatedAt)
 {
-    public static FileDto From(FileItem f, ArchiveCategory c) =>
-        new(f.Id, f.CategoryId, c.SiteName, c.EventDate, c.EventReason,
-            f.OriginalName, f.ContentType, f.SizeBytes, f.UploaderName, f.CreatedAt);
+    public static FileDto From(FileItem f) =>
+        new(f.Id, f.OriginalName, f.ContentType, f.SizeBytes, f.UploaderName, f.CreatedAt);
 }

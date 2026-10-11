@@ -334,9 +334,6 @@ namespace MC.Erp.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("CategoryId")
-                        .HasColumnType("uuid");
-
                     b.Property<string>("ContentType")
                         .IsRequired()
                         .HasColumnType("text");
@@ -372,14 +369,12 @@ namespace MC.Erp.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CategoryId");
-
                     b.HasIndex("CreatedAt");
 
                     b.ToTable("storage_files", (string)null);
                 });
 
-            modelBuilder.Entity("MC.Erp.Features.System.Entities.ArchiveCategory", b =>
+            modelBuilder.Entity("MC.Erp.Features.System.Entities.SysDict", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -391,33 +386,50 @@ namespace MC.Erp.Migrations
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<DateTime>("EventDate")
-                        .HasColumnType("timestamp with time zone");
+                    b.Property<bool>("Enabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
 
-                    b.Property<string>("EventReason")
+                    b.Property<string>("GroupName")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
-                    b.Property<string>("Remark")
-                        .HasColumnType("text");
-
-                    b.Property<string>("SiteName")
+                    b.Property<string>("Label")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Remark")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<int>("Sort")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("EventDate");
+                    b.HasIndex("Enabled")
+                        .HasDatabaseName("idx_sys_dict_enabled");
 
-                    b.HasIndex("SiteName");
+                    b.HasIndex("GroupName")
+                        .HasDatabaseName("idx_sys_dict_group_name");
 
-                    b.ToTable("system_archive_categories", (string)null);
+                    b.ToTable("sys_dict", (string)null);
                 });
 
             modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.AttendanceRecord", b =>
@@ -486,17 +498,6 @@ namespace MC.Erp.Migrations
                     b.Navigation("Role");
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("MC.Erp.Features.Storage.Entities.FileItem", b =>
-                {
-                    b.HasOne("MC.Erp.Features.System.Entities.ArchiveCategory", "Category")
-                        .WithMany()
-                        .HasForeignKey("CategoryId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Category");
                 });
 
             modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.Site", b =>

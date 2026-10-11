@@ -21,15 +21,15 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
     public DbSet<AttendanceRecord> AttendanceRecords => Set<AttendanceRecord>();
     public DbSet<MonthlyWorkSummary> MonthlyWorkSummaries => Set<MonthlyWorkSummary>();
 
-    // System（歸檔分類字典，跨模組共享）
-    public DbSet<ArchiveCategory> ArchiveCategories => Set<ArchiveCategory>();
+    // System（系統級字典及其他系統配置）
+    public DbSet<SysDict> SysDicts => Set<SysDict>();
 
     // Storage
     public DbSet<FileItem> FileItems => Set<FileItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // Identity 模組
+        // Identity 模塊
         modelBuilder.Entity<User>(e =>
         {
             e.ToTable("identity_users");
@@ -74,7 +74,7 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
             e.HasIndex(rp => new { rp.RoleId, rp.PermissionId }).IsUnique();
         });
 
-        // Attendance 模組
+        // Attendance 模塊
         modelBuilder.Entity<Worker>(e =>
         {
             e.ToTable("attendance_workers");
@@ -110,25 +110,28 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
             e.HasIndex(s => new { s.WorkerId, s.Year, s.Month }).IsUnique();
         });
 
-        // System 模組：歸檔分類字典（跨模組共享）
-        modelBuilder.Entity<ArchiveCategory>(e =>
+        // System 模塊：系統字典
+        modelBuilder.Entity<SysDict>(e =>
         {
-            e.ToTable("system_archive_categories");
-            e.HasQueryFilter(c => !c.IsDeleted);
-            e.HasIndex(c => c.SiteName);
-            e.HasIndex(c => c.EventDate);
+            e.ToTable("sys_dict");
+            e.HasKey(d => d.Id);
+            e.Property(d => d.GroupName).HasMaxLength(50).IsRequired();
+            e.Property(d => d.Label).HasMaxLength(100).IsRequired();
+            e.Property(d => d.Value).HasMaxLength(50).IsRequired();
+            e.Property(d => d.Sort).HasDefaultValue(0);
+            e.Property(d => d.Enabled).HasDefaultValue(true);
+            e.Property(d => d.Remark).HasMaxLength(255);
+            e.HasIndex(d => d.GroupName).HasDatabaseName("idx_sys_dict_group_name");
+            e.HasIndex(d => d.Enabled).HasDatabaseName("idx_sys_dict_enabled");
+            e.HasQueryFilter(d => !d.IsDeleted);
         });
 
-        // Storage 模組
+        // Storage 模塊
         modelBuilder.Entity<FileItem>(e =>
         {
             e.ToTable("storage_files");
             e.HasQueryFilter(f => !f.IsDeleted);
-            e.HasIndex(f => f.CategoryId);
             e.HasIndex(f => f.CreatedAt);
-            e.HasOne(f => f.Category)
-                .WithMany()
-                .HasForeignKey(f => f.CategoryId);
         });
     }
 }
