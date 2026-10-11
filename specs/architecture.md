@@ -165,6 +165,9 @@ User ─┬─ UserRole ── Role ── RolePermission ── Permission
 
 ### 考勤打卡數據
 
+- 現階段按月提供員工薪酬表和打卡明細；管理員可編輯並保存，注意事項最多 255 字元。金額使用 `decimal(18,2)`，工數和小時使用 `decimal(8,2)`。
+- 真實打卡機未對接：開發環境管理員通過 `/api/attendance/mock?year=...&month=...` 手動初始化模擬數據，重複初始化不覆蓋已有月結和打卡修正；正式環境不開放初始化。
+- 打卡時間入庫使用 UTC，查詢月份及前端展示按香港時區（UTC+8）。薪酬樣例金額與打卡明細獨立，計薪規則確認前不自動計算，也不啟用定時同步。
 - 通過 `IHttpClientFactory` 調用外部考勤接口
 - Hangfire 定時任務拉取打卡數據
 - CancellationToken 在 Infrastructure 層統一處理

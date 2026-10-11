@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import AppIcon from '@/components/AppIcon.vue'
@@ -10,6 +11,8 @@ const router = useRouter()
 const auth = useAuthStore()
 
 const collapsed = ref(false)
+const compact = useMediaQuery('(max-width: 600px)')
+const menuCollapsed = computed(() => collapsed.value || compact.value)
 
 interface MenuItem {
   path: string
@@ -51,12 +54,12 @@ async function handleLogout() {
 <template>
   <el-container class="layout">
     <!-- 側邊欄 -->
-    <el-aside :width="collapsed ? '64px' : '220px'" class="sidebar">
+    <el-aside :width="menuCollapsed ? '64px' : '220px'" class="sidebar">
       <div class="brand" @click="router.push('/')">
         <AppIcon name="hard-hat" :size="26" class="brand-icon" />
-        <span v-show="!collapsed" class="brand-name">MC ERP</span>
+        <span v-show="!menuCollapsed" class="brand-name">MC ERP</span>
       </div>
-      <el-menu class="mc-menu" :collapse="collapsed" :default-active="activeMenu" :collapse-transition="false">
+      <el-menu class="mc-menu" :collapse="menuCollapsed" :default-active="activeMenu" :collapse-transition="false">
         <el-menu-item v-for="m in menus" :key="m.name" :index="m.name" @click="router.push(m.path)">
           <AppIcon :name="m.icon" :size="18" />
           <template #title>{{ m.title }}</template>
@@ -77,7 +80,7 @@ async function handleLogout() {
     <el-container>
       <!-- 頂部工具欄 -->
       <el-header class="toolbar" height="56px">
-        <button class="collapse-btn" type="button" @click="collapsed = !collapsed">
+        <button v-if="!compact" class="collapse-btn" type="button" aria-label="切換側欄" @click="collapsed = !collapsed">
           <AppIcon :name="collapsed ? 'chevrons-right' : 'chevrons-left'" :size="18" />
         </button>
         <el-breadcrumb separator="/">
@@ -223,5 +226,11 @@ async function handleLogout() {
 .content {
   padding: 24px;
   overflow-y: auto;
+}
+
+@media (max-width: 600px) {
+  .toolbar { gap: 8px; padding: 0 8px; }
+  .user-name { display: none; }
+  .content { padding: 16px; }
 }
 </style>

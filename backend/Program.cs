@@ -2,6 +2,9 @@ using System.Text;
 using MC.Erp.Common;
 using MC.Erp.Common.Security;
 using MC.Erp.Data;
+using MC.Erp.Features.Attendance.Endpoints;
+using MC.Erp.Features.Attendance.Repositories;
+using MC.Erp.Features.Attendance.Services;
 using MC.Erp.Features.Identity.Endpoints;
 using MC.Erp.Features.Identity.Repositories;
 using MC.Erp.Features.Identity.Services;
@@ -69,6 +72,12 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<RoleService>();
 
+// Attendance 模塊
+builder.Services.AddScoped<IAttendanceRepository, AttendanceRepository>();
+builder.Services.AddScoped<AttendanceServices>();
+builder.Services.AddScoped<IExternalAttendanceApi, ExternalAttendanceApi>();
+builder.Services.AddScoped<AttendanceTableService>();
+
 // Storage 模塊
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection("Storage"));
 builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
@@ -114,6 +123,7 @@ if (app.Environment.IsDevelopment())
 
 // 端點
 app.MapIdentityEndpoints();
+app.MapAttendanceEndpoints();
 app.MapSystemEndpoints();
 app.MapStorageEndpoints();
 

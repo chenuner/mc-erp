@@ -101,12 +101,25 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
         modelBuilder.Entity<AttendanceRecord>(e =>
         {
             e.ToTable("attendance_records");
+            e.Property(r => r.OvertimeHours).HasPrecision(8, 2);
+            e.Property(r => r.Remark).HasMaxLength(255);
             e.HasIndex(r => new { r.WorkerId, r.ClockInTime });
         });
 
         modelBuilder.Entity<MonthlyWorkSummary>(e =>
         {
             e.ToTable("attendance_monthly_summaries");
+            e.Property(s => s.WorkDays).HasPrecision(8, 2);
+            e.Property(s => s.LaborLeaveDays).HasPrecision(8, 2);
+            e.Property(s => s.TotalWorkDays).HasPrecision(8, 2);
+            e.Property(s => s.OvertimeHours).HasPrecision(8, 2);
+            e.Property(s => s.DailyWage).HasPrecision(18, 2);
+            e.Property(s => s.OvertimeAmount).HasPrecision(18, 2);
+            e.Property(s => s.MpfEmployer).HasPrecision(18, 2);
+            e.Property(s => s.MpfEmployee).HasPrecision(18, 2);
+            e.Property(s => s.ActualPay).HasPrecision(18, 2);
+            e.Property(s => s.TotalAmount).HasPrecision(18, 2);
+            e.Property(s => s.Remark).HasMaxLength(255);
             e.HasIndex(s => new { s.WorkerId, s.Year, s.Month }).IsUnique();
         });
 

@@ -38,10 +38,12 @@ namespace MC.Erp.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<decimal>("OvertimeHours")
-                        .HasColumnType("numeric");
+                        .HasPrecision(8, 2)
+                        .HasColumnType("numeric(8,2)");
 
                     b.Property<string>("Remark")
-                        .HasColumnType("text");
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
 
                     b.Property<Guid>("SiteId")
                         .HasColumnType("uuid");
@@ -65,40 +67,51 @@ namespace MC.Erp.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<decimal>("ActualPay")
-                        .HasColumnType("numeric");
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
 
                     b.Property<decimal>("DailyWage")
-                        .HasColumnType("numeric");
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
 
                     b.Property<decimal>("LaborLeaveDays")
-                        .HasColumnType("numeric");
+                        .HasPrecision(8, 2)
+                        .HasColumnType("numeric(8,2)");
 
                     b.Property<int>("Month")
                         .HasColumnType("integer");
 
                     b.Property<decimal>("MpfEmployee")
-                        .HasColumnType("numeric");
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
 
                     b.Property<decimal>("MpfEmployer")
-                        .HasColumnType("numeric");
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
 
                     b.Property<decimal>("OvertimeAmount")
-                        .HasColumnType("numeric");
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
 
                     b.Property<decimal>("OvertimeHours")
-                        .HasColumnType("numeric");
+                        .HasPrecision(8, 2)
+                        .HasColumnType("numeric(8,2)");
 
                     b.Property<string>("Remark")
-                        .HasColumnType("text");
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
 
                     b.Property<decimal>("TotalAmount")
-                        .HasColumnType("numeric");
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
 
                     b.Property<decimal>("TotalWorkDays")
-                        .HasColumnType("numeric");
+                        .HasPrecision(8, 2)
+                        .HasColumnType("numeric(8,2)");
 
                     b.Property<decimal>("WorkDays")
-                        .HasColumnType("numeric");
+                        .HasPrecision(8, 2)
+                        .HasColumnType("numeric(8,2)");
 
                     b.Property<Guid>("WorkerId")
                         .HasColumnType("uuid");

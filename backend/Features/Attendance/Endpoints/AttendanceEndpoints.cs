@@ -29,8 +29,9 @@ public static class AttendanceEndpoints
         group.MapGet("/summaries/{workerId:guid}", GetWorkerSummaryAsync).RequireAuthorization();
 
         // 操作
-        group.MapPost("/sync", TriggerSyncAsync).RequireAuthorization("admin");
-        group.MapPost("/calculate", TriggerCalculateAsync).RequireAuthorization("admin");
+        group.MapPost("/calculate", () => TypedResults.Problem(
+            "計薪規則尚未確認，暫不開放自動計算。", statusCode: StatusCodes.Status409Conflict)).RequireAuthorization("admin");
+        group.MapAttendanceTableEndpoints();
     }
 
     // --- 工人 ---
@@ -93,19 +94,6 @@ public static class AttendanceEndpoints
         return summary is null ? TypedResults.NotFound() : TypedResults.Ok(SummaryDto.From(summary));
     }
 
-    // --- 操作 ---
-    private static async Task<Ok> TriggerSyncAsync(AttendanceSyncService sync, CancellationToken ct)
-    {
-        await sync.SyncDailyAsync(ct);
-        return TypedResults.Ok();
-    }
-
-    private static async Task<Ok> TriggerCalculateAsync(
-        int year, int month, PayrollService payroll, CancellationToken ct)
-    {
-        await payroll.計算月結Async(year, month, ct);
-        return TypedResults.Ok();
-    }
 }
 
 // DTOs
