@@ -1,6 +1,7 @@
 using MC.Erp.Common.Security;
 using MC.Erp.Data;
 using MC.Erp.Features.Storage.Entities;
+using MC.Erp.Features.System.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace MC.Erp.Features.Storage.Services;
@@ -8,12 +9,18 @@ namespace MC.Erp.Features.Storage.Services;
 /// <summary>
 /// 文件服務：上傳 / 列表 / 下載 / 刪除
 /// </summary>
-public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentUser user)
+public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentUser user, SysDictService dictService)
 {
-    public async Task<FileItem> 上传Async(string originalName, string contentType, long sizeBytes, Stream content, CancellationToken ct)
+    public async Task<FileItem> 上传Async(Guid type, string originalName, string contentType, long sizeBytes, Stream content, CancellationToken ct)
     {
+        var dict = await dictService.GetByIdAsync(type, ct);
+        if (dict is null || !dict.Enabled)
+            throw new InvalidOperationException("請選擇有效且啟用的文件類別");
+
         var file = new FileItem
         {
+            Type = dict.Id,
+            TypeDict = dict,
             OriginalName = originalName,
             StoredName = await storage.SaveAsync(content, originalName, ct),
             ContentType = contentType,
@@ -27,11 +34,12 @@ public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentU
         return file;
     }
 
-    public async Task<List<FileItem>> 列表Async(CancellationToken ct)
+    public async Task<List<FileItem>> 列表Async(Guid? type, CancellationToken ct)
     {
         return await db.FileItems
             .AsNoTracking()
-            .Where(f => !f.IsDeleted)
+            .Include(f => f.TypeDict)
+            .Where(f => !f.IsDeleted && (type == null || f.Type == type))
             .OrderByDescending(f => f.CreatedAt)
             .ToListAsync(ct);
     }

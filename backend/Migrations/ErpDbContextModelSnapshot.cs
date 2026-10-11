@@ -358,6 +358,9 @@ namespace MC.Erp.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("Type")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -370,6 +373,8 @@ namespace MC.Erp.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedAt");
+
+                    b.HasIndex("Type");
 
                     b.ToTable("storage_files", (string)null);
                 });
@@ -498,6 +503,16 @@ namespace MC.Erp.Migrations
                     b.Navigation("Role");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("MC.Erp.Features.Storage.Entities.FileItem", b =>
+                {
+                    b.HasOne("MC.Erp.Features.System.Entities.SysDict", "TypeDict")
+                        .WithMany()
+                        .HasForeignKey("Type")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("TypeDict");
                 });
 
             modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.Site", b =>

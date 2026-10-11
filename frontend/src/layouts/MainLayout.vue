@@ -26,7 +26,7 @@ const menus: MenuItem[] = [
 ]
 
 const systemMenus: MenuItem[] = [
-  { path: '/system/categories', name: 'system-categories', title: '分類字典', icon: 'bookmark' },
+  { path: '/system/categories', name: 'system-categories', title: '系統字典', icon: 'bookmark' },
   { path: '/system/users', name: 'system-users', title: '用戶管理', icon: 'shield' },
 ]
 

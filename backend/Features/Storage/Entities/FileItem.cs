@@ -1,4 +1,5 @@
 using MC.Erp.Common.Domain;
+using MC.Erp.Features.System.Entities;
 
 namespace MC.Erp.Features.Storage.Entities;
 
@@ -7,6 +8,9 @@ namespace MC.Erp.Features.Storage.Entities;
 /// </summary>
 public sealed class FileItem : AuditableEntity
 {
+    public Guid? Type { get; set; }
+    public SysDict? TypeDict { get; set; }
+
     public string OriginalName { get; set; } = null!;  // 原始文件名
     public string StoredName { get; set; } = null!;     // 磁盤存儲名（Guid + 擴展名）
     public string ContentType { get; set; } = null!;

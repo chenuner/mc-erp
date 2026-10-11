@@ -2,10 +2,8 @@ import request from './request'
 
 export interface FileDto {
   id: string
-  categoryId: string
-  siteName: string
-  eventDate: string
-  eventReason: string
+  type: string | null
+  typeLabel: string | null
   originalName: string
   contentType: string
   sizeBytes: number
@@ -13,15 +11,15 @@ export interface FileDto {
   createdAt: string
 }
 
-export async function listFiles(categoryId?: string): Promise<FileDto[]> {
-  return (await request.get('/storage/files', { params: categoryId ? { categoryId } : {} })) as FileDto[]
+export async function listFiles(type?: string): Promise<FileDto[]> {
+  return (await request.get('/storage/files', { params: type ? { type } : {} })) as FileDto[]
 }
 
-export async function uploadFile(categoryId: string, file: File): Promise<FileDto> {
+export async function uploadFile(type: string, file: File): Promise<FileDto> {
   const form = new FormData()
   form.append('file', file)
   return (await request.post('/storage/files', form, {
-    params: { categoryId },
+    params: { type },
     headers: { 'Content-Type': 'multipart/form-data' },
   })) as FileDto
 }

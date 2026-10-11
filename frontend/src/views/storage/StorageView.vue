@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, type UploadFile, type UploadFiles, type UploadRequestOptions } from 'element-plus'
 import AppIcon from '@/components/AppIcon.vue'
-import { listCategories, type CategoryDto } from '@/api/system'
+import { listSysDicts, type SysDictDto } from '@/api/system'
 import {
   deleteFile,
   downloadFile,
@@ -14,19 +14,28 @@ import {
 
 type ViewMode = 'list' | 'grid'
 
-// ---------- 分類（來自系統字典） ----------
-const categoryLoading = ref(false)
-const categories = ref<CategoryDto[]>([])
-const filterCategoryId = ref<string>('')
+const dictLoading = ref(false)
+const dicts = ref<SysDictDto[]>([])
+const filterType = ref('')
+const enabledDicts = computed(() => dicts.value.filter((dict) => dict.enabled))
 
-async function fetchCategories() {
-  categoryLoading.value = true
+async function fetchDicts() {
+  dictLoading.value = true
   try {
-    categories.value = await listCategories()
+    const items: SysDictDto[] = []
+    let page = 1
+    let total = 0
+    do {
+      const result = await listSysDicts(page++, 100)
+      items.push(...result.items)
+      total = result.total
+      if (result.items.length === 0) break
+    } while (items.length < total)
+    dicts.value = items
   } catch {
     /* 攔截器已提示 */
   } finally {
-    categoryLoading.value = false
+    dictLoading.value = false
   }
 }
 
@@ -45,8 +54,8 @@ function formatDate(iso: string): string {
   return iso.slice(0, 10)
 }
 
-function categoryLabel(c: CategoryDto): string {
-  return `${c.siteName} · ${formatDate(c.eventDate)} · ${c.eventReason}`
+function dictLabel(dict: SysDictDto): string {
+  return `${dict.groupName} / ${dict.label}`
 }
 
 interface FileTypeInfo {
@@ -68,7 +77,7 @@ function fileTypeInfo(contentType: string, name: string): FileTypeInfo {
 async function fetchFiles() {
   fileLoading.value = true
   try {
-    files.value = await listFiles(filterCategoryId.value || undefined)
+    files.value = await listFiles(filterType.value || undefined)
   } catch {
     /* 攔截器已提示 */
   } finally {
@@ -77,19 +86,19 @@ async function fetchFiles() {
 }
 
 // ---------- 上傳 ----------
-const uploadCategoryId = ref('')
+const uploadType = ref('')
 const uploadDialog = ref(false)
 const uploading = ref(false)
 const uploadFileList = ref<UploadFiles>([])
 
-const uploadDisabled = computed(() => !uploadCategoryId.value || uploadFileList.value.length === 0)
+const uploadDisabled = computed(() => !uploadType.value || uploadFileList.value.length === 0)
 
 function openUpload() {
-  if (categories.value.length === 0) {
-    ElMessage.warning('請先到「系統設置 / 分類字典」創建分類再上傳文件')
+  if (enabledDicts.value.length === 0) {
+    ElMessage.warning('請先到「系統設置 / 系統字典」新增並啟用字典項')
     return
   }
-  uploadCategoryId.value = filterCategoryId.value || categories.value[0].id
+  uploadType.value = enabledDicts.value.find((dict) => dict.id === filterType.value)?.id ?? ''
   uploadFileList.value = []
   uploadDialog.value = true
 }
@@ -109,7 +118,7 @@ async function confirmUpload() {
   try {
     for (const f of uploadFileList.value) {
       try {
-        await uploadFile(uploadCategoryId.value, f.raw!)
+        await uploadFile(uploadType.value, f.raw!)
         ok++
       } catch {
         /* 單個失敗繼續後面的 */
@@ -210,7 +219,7 @@ function clearThumbs() {
   Object.keys(thumbUrls).forEach((k) => delete thumbUrls[k])
 }
 
-watch(filterCategoryId, () => {
+watch(filterType, () => {
   clearThumbs()
   fetchFiles()
 })
@@ -221,7 +230,7 @@ onBeforeUnmount(() => {
 })
 
 onMounted(async () => {
-  await fetchCategories()
+  await fetchDicts()
   await fetchFiles()
 })
 </script>
@@ -232,9 +241,8 @@ onMounted(async () => {
     <div class="page-header">
       <div>
         <h1 class="page-title">地盤文件</h1>
-        <p class="page-desc">上傳地盤照片與文件，按系統分類字典歸檔到對應地盤與事件</p>
       </div>
-      <el-button type="primary" @click="openUpload">
+      <el-button type="primary" :disabled="dictLoading" @click="openUpload">
         <el-icon style="margin-right: 6px"><AppIcon name="construction" :size="14" /></el-icon>
         上傳文件
       </el-button>
@@ -243,17 +251,19 @@ onMounted(async () => {
     <!-- 工具欄 -->
     <div class="toolbar mc-card">
       <el-select
-        v-model="filterCategoryId"
-        placeholder="按分類篩選"
+        v-model="filterType"
+        placeholder="按文件類別篩選"
+        aria-label="文件類別"
+        :loading="dictLoading"
+        filterable
         clearable
         style="width: 280px"
-        @change="fetchFiles"
       >
         <el-option
-          v-for="c in categories"
-          :key="c.id"
-          :value="c.id"
-          :label="categoryLabel(c)"
+          v-for="dict in dicts"
+          :key="dict.id"
+          :value="dict.id"
+          :label="dictLabel(dict)"
         />
       </el-select>
 
@@ -276,9 +286,10 @@ onMounted(async () => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="地盤" prop="siteName" min-width="120" />
-        <el-table-column label="事件原因" prop="eventReason" min-width="160" />
-        <el-table-column label="類型" width="90" align="center">
+        <el-table-column label="文件類別" min-width="140">
+          <template #default="{ row }">{{ row.typeLabel ?? '—' }}</template>
+        </el-table-column>
+        <el-table-column label="格式" width="90" align="center">
           <template #default="{ row }">
             <el-tag effect="plain" round>{{ fileTypeInfo(row.contentType, row.originalName).label }}</el-tag>
           </template>
@@ -332,7 +343,7 @@ onMounted(async () => {
           <div class="card-body">
             <div class="card-name" :title="f.originalName">{{ f.originalName }}</div>
             <div class="card-meta">
-              <span>{{ f.siteName }}</span>
+              <span>{{ f.typeLabel ?? '—' }}</span>
               <span class="dot">·</span>
               <span class="num">{{ formatSize(f.sizeBytes) }}</span>
             </div>
@@ -349,13 +360,13 @@ onMounted(async () => {
     <!-- 上傳 -->
     <el-dialog v-model="uploadDialog" title="上傳文件" width="520px" :close-on-click-modal="false">
       <el-form label-position="top">
-        <el-form-item label="歸檔分類" required>
-          <el-select v-model="uploadCategoryId" placeholder="選擇分類（地盤 / 時間 / 事件原因）" style="width: 100%">
+        <el-form-item label="文件類別" required>
+          <el-select v-model="uploadType" placeholder="選擇系統字典項" filterable style="width: 100%">
             <el-option
-              v-for="c in categories"
-              :key="c.id"
-              :value="c.id"
-              :label="categoryLabel(c)"
+              v-for="dict in enabledDicts"
+              :key="dict.id"
+              :value="dict.id"
+              :label="dictLabel(dict)"
             />
           </el-select>
         </el-form-item>

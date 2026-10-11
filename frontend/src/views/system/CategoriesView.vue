@@ -3,15 +3,18 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import AppIcon from '@/components/AppIcon.vue'
 import {
-  createCategory,
-  deleteCategory,
-  listCategories,
-  updateCategory,
-  type CategoryDto,
+  createSysDict,
+  deleteSysDict,
+  listSysDicts,
+  updateSysDict,
+  type SysDictDto,
 } from '@/api/system'
 
 const loading = ref(false)
-const categories = ref<CategoryDto[]>([])
+const dicts = ref<SysDictDto[]>([])
+const page = ref(1)
+const pageSize = ref(20)
+const total = ref(0)
 
 const dialogVisible = ref(false)
 const editingId = ref<string | null>(null)
@@ -19,26 +22,30 @@ const submitting = ref(false)
 const formRef = ref<FormInstance>()
 
 const form = reactive({
-  siteName: '',
-  eventDate: '',
-  eventReason: '',
+  groupName: '',
+  label: '',
+  value: '',
+  sort: 0,
+  enabled: true,
   remark: '',
 })
 
 const rules: FormRules<typeof form> = {
-  siteName: [{ required: true, message: '請輸入地盤名稱', trigger: 'blur' }],
-  eventDate: [{ required: true, message: '請選擇時間', trigger: 'change' }],
-  eventReason: [{ required: true, message: '請輸入事件原因', trigger: 'blur' }],
+  groupName: [{ required: true, message: '請輸入分組', trigger: 'blur' }],
+  label: [{ required: true, message: '請輸入標籤', trigger: 'blur' }],
+  value: [{ required: true, message: '請輸入值', trigger: 'blur' }],
 }
 
-function formatDate(iso: string): string {
-  return iso.slice(0, 10)
-}
-
-async function fetchCategories() {
+async function fetchDicts() {
   loading.value = true
   try {
-    categories.value = await listCategories()
+    const result = await listSysDicts(page.value, pageSize.value)
+    dicts.value = result.items
+    total.value = result.total
+    if (page.value > 1 && dicts.value.length === 0) {
+      page.value--
+      await fetchDicts()
+    }
   } catch {
     /* 攔截器已提示 */
   } finally {
@@ -48,18 +55,22 @@ async function fetchCategories() {
 
 function openCreate() {
   editingId.value = null
-  form.siteName = ''
-  form.eventDate = ''
-  form.eventReason = ''
+  form.groupName = ''
+  form.label = ''
+  form.value = ''
+  form.sort = 0
+  form.enabled = true
   form.remark = ''
   dialogVisible.value = true
 }
 
-function openEdit(row: CategoryDto) {
+function openEdit(row: SysDictDto) {
   editingId.value = row.id
-  form.siteName = row.siteName
-  form.eventDate = row.eventDate.slice(0, 10)
-  form.eventReason = row.eventReason
+  form.groupName = row.groupName
+  form.label = row.label
+  form.value = row.value
+  form.sort = row.sort
+  form.enabled = row.enabled
   form.remark = row.remark ?? ''
   dialogVisible.value = true
 }
@@ -70,14 +81,15 @@ async function handleSubmit() {
   submitting.value = true
   try {
     if (editingId.value) {
-      await updateCategory(editingId.value, { ...form })
-      ElMessage.success('分類已更新')
+      const { groupName: _groupName, ...payload } = form
+      await updateSysDict(editingId.value, payload)
+      ElMessage.success('字典項已更新')
     } else {
-      await createCategory({ ...form })
-      ElMessage.success('分類已創建')
+      await createSysDict({ ...form })
+      ElMessage.success('字典項已創建')
     }
     dialogVisible.value = false
-    await fetchCategories()
+    await fetchDicts()
   } catch {
     /* 攔截器已提示 */
   } finally {
@@ -85,22 +97,21 @@ async function handleSubmit() {
   }
 }
 
-async function handleDelete(row: CategoryDto) {
-  await ElMessageBox.confirm(
-    `確定刪除分類「${row.siteName} / ${row.eventReason}」嗎？`,
-    '提示',
-    { confirmButtonText: '刪除', cancelButtonText: '取消', type: 'warning' },
-  )
+async function handleDelete(row: SysDictDto) {
   try {
-    await deleteCategory(row.id)
+    await ElMessageBox.confirm(
+      `確定刪除字典項「${row.groupName} / ${row.label}」嗎？`,
+      '提示',
+      { confirmButtonText: '刪除', cancelButtonText: '取消', type: 'warning' },
+    )
+    await deleteSysDict(row.id)
     ElMessage.success('已刪除')
-    await fetchCategories()
+    await fetchDicts()
   } catch {
-    /* 攔截器已提示（有文件引用時後端會拒絕） */
   }
 }
 
-onMounted(fetchCategories)
+onMounted(fetchDicts)
 </script>
 
 <template>
@@ -108,32 +119,28 @@ onMounted(fetchCategories)
     <!-- 頁頭 -->
     <div class="page-header">
       <div>
-        <h1 class="page-title">分類字典</h1>
-        <p class="page-desc">系統級歸檔分類（地盤 / 時間 / 事件原因），地盤文件、會計收據等模組共用</p>
+        <h1 class="page-title">系統字典</h1>
       </div>
       <el-button type="primary" @click="openCreate">
         <el-icon style="margin-right: 6px"><AppIcon name="plus" :size="14" /></el-icon>
-        新建分類
+        新建字典項
       </el-button>
     </div>
 
     <!-- 分類列表 -->
     <div class="mc-card table-card">
-      <el-table v-loading="loading" :data="categories" stripe>
-        <el-table-column label="地盤" prop="siteName" min-width="140" />
-        <el-table-column label="時間" width="120">
-          <template #default="{ row }">
-            <span class="num">{{ formatDate(row.eventDate) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="事件原因" prop="eventReason" min-width="180" />
+      <el-table v-loading="loading" :data="dicts" stripe>
+        <el-table-column label="分組" prop="groupName" min-width="140" />
+        <el-table-column label="標籤" prop="label" min-width="140" />
+        <el-table-column label="值" prop="value" min-width="120" />
+        <el-table-column label="排序" prop="sort" width="80" />
         <el-table-column label="備註" min-width="140">
           <template #default="{ row }">{{ row.remark ?? '—' }}</template>
         </el-table-column>
-        <el-table-column label="引用文件" width="100" align="center">
+        <el-table-column label="狀態" width="100" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.fileCount > 0 ? 'info' : 'success'" effect="plain" round>
-              {{ row.fileCount }}
+            <el-tag :type="row.enabled ? 'success' : 'info'" effect="plain" round>
+              {{ row.enabled ? '啟用' : '停用' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -144,25 +151,39 @@ onMounted(fetchCategories)
           </template>
         </el-table-column>
         <template #empty>
-          <el-empty description="暫無分類，點擊「新建分類」創建" :image-size="72" />
+          <el-empty description="暫無字典項" :image-size="72" />
         </template>
       </el-table>
+      <el-pagination
+        v-model:current-page="page"
+        :page-size="pageSize"
+        :total="total"
+        layout="total, prev, pager, next"
+        class="pagination"
+        @current-change="fetchDicts"
+      />
     </div>
 
     <!-- 新建 / 編輯分類 -->
-    <el-dialog v-model="dialogVisible" :title="editingId ? '編輯分類' : '新建分類'" width="460px" :close-on-click-modal="false">
+    <el-dialog v-model="dialogVisible" :title="editingId ? '編輯字典項' : '新建字典項'" width="460px" :close-on-click-modal="false" @closed="formRef?.clearValidate()">
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
-        <el-form-item label="地盤" prop="siteName">
-          <el-input v-model="form.siteName" placeholder="如：將軍澳地盤" />
+        <el-form-item label="分組" prop="groupName">
+          <el-input v-model="form.groupName" :disabled="!!editingId" maxlength="50" />
         </el-form-item>
-        <el-form-item label="時間" prop="eventDate">
-          <el-date-picker v-model="form.eventDate" type="date" value-format="YYYY-MM-DD" placeholder="選擇日期" style="width: 100%" />
+        <el-form-item label="標籤" prop="label">
+          <el-input v-model="form.label" maxlength="100" />
         </el-form-item>
-        <el-form-item label="事件原因" prop="eventReason">
-          <el-input v-model="form.eventReason" placeholder="如：混凝土澆築驗收" />
+        <el-form-item label="值" prop="value">
+          <el-input v-model="form.value" maxlength="50" />
+        </el-form-item>
+        <el-form-item label="排序" prop="sort">
+          <el-input-number v-model="form.sort" :precision="0" />
+        </el-form-item>
+        <el-form-item label="啟用" prop="enabled">
+          <el-switch v-model="form.enabled" />
         </el-form-item>
         <el-form-item label="備註" prop="remark">
-          <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可選" />
+          <el-input v-model="form.remark" type="textarea" :rows="2" maxlength="255" placeholder="可選" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -196,5 +217,10 @@ onMounted(fetchCategories)
 
 .table-card {
   padding: 8px 0 0;
+}
+
+.pagination {
+  justify-content: flex-end;
+  padding: 16px;
 }
 </style>

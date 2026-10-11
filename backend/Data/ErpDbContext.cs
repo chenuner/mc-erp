@@ -132,6 +132,10 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
             e.ToTable("storage_files");
             e.HasQueryFilter(f => !f.IsDeleted);
             e.HasIndex(f => f.CreatedAt);
+            e.HasOne(f => f.TypeDict)
+                .WithMany()
+                .HasForeignKey(f => f.Type)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

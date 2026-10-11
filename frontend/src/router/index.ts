@@ -43,7 +43,7 @@ const router = createRouter({
           path: 'system/categories',
           name: 'system-categories',
           component: () => import('@/views/system/CategoriesView.vue'),
-          meta: { title: '分類字典' },
+          meta: { title: '系統字典' },
         },
         {
           path: 'system/users',

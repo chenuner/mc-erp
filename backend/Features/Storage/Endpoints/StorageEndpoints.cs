@@ -20,14 +20,14 @@ public static class StorageEndpoints
     }
 
     private static async Task<Ok<List<FileDto>>> ListFilesAsync(
-        FileService svc, CancellationToken ct)
+        Guid? type, FileService svc, CancellationToken ct)
     {
-        var items = await svc.列表Async(ct);
+        var items = await svc.列表Async(type, ct);
         return TypedResults.Ok(items.Select(FileDto.From).ToList());
     }
 
     private static async Task<Results<Created<FileDto>, BadRequest<string>>> UploadFileAsync(
-        IFormFile file, FileService svc, CancellationToken ct)
+        Guid type, IFormFile file, FileService svc, CancellationToken ct)
     {
         if (file.Length == 0)
         {
@@ -37,7 +37,7 @@ public static class StorageEndpoints
         try
         {
             await using var stream = file.OpenReadStream();
-            var item = await svc.上传Async(file.FileName, file.ContentType, file.Length, stream, ct);
+            var item = await svc.上传Async(type, file.FileName, file.ContentType, file.Length, stream, ct);
             return TypedResults.Created($"/api/storage/files/{item.Id}", FileDto.From(item));
         }
         catch (InvalidOperationException ex)
@@ -65,8 +65,8 @@ public static class StorageEndpoints
 }
 
 public sealed record FileDto(
-    Guid Id, string OriginalName, string ContentType, long SizeBytes, string? UploaderName, DateTime CreatedAt)
+    Guid Id, Guid? Type, string? TypeLabel, string OriginalName, string ContentType, long SizeBytes, string? UploaderName, DateTime CreatedAt)
 {
     public static FileDto From(FileItem f) =>
-        new(f.Id, f.OriginalName, f.ContentType, f.SizeBytes, f.UploaderName, f.CreatedAt);
+        new(f.Id, f.Type, f.TypeDict?.Label, f.OriginalName, f.ContentType, f.SizeBytes, f.UploaderName, f.CreatedAt);
 }

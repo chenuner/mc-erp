@@ -34,8 +34,4 @@
     <PackageReference Include="AspNetCore.HealthChecks.NpgSql" Version="9.0.0" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Features\System\Services\" />
-  </ItemGroup>
-
 </Project>
