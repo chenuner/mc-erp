@@ -1,6 +1,10 @@
 using System.Text;
 using MC.Erp.Common;
 using MC.Erp.Common.Security;
+using MC.Erp.Common.Infrastructure.Ocr;
+using MC.Erp.Features.Accounting.Endpoints;
+using MC.Erp.Features.Accounting.Repositories;
+using MC.Erp.Features.Accounting.Services;
 using MC.Erp.Data;
 using MC.Erp.Features.Attendance.Endpoints;
 using MC.Erp.Features.Attendance.Repositories;
@@ -64,6 +68,11 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<IPasswordHasher, PasswordHasher>();
 builder.Services.AddSingleton<IJwtTokenGenerator, JwtTokenGenerator>();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
+builder.Services.Configure<OcrOptions>(builder.Configuration.GetSection("Ocr"));
+builder.Services.AddSingleton<IOcrService, AzureDocumentOcrService>();
+builder.Services.AddScoped<ReceiptRepository>();
+builder.Services.AddScoped<ReceiptService>();
+builder.Services.AddScoped<AccountingFileProtectionService>();
 
 // Identity 模塊
 builder.Services.AddScoped<IUserRepository, UserRepository>();
@@ -126,6 +135,7 @@ app.MapIdentityEndpoints();
 app.MapAttendanceEndpoints();
 app.MapSystemEndpoints();
 app.MapStorageEndpoints();
+app.MapAccountingEndpoints();
 
 // 初始化種子數據
 await app.Services.InitializeSeedDataAsync();

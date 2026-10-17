@@ -16,7 +16,7 @@ export const useAuthStore = defineStore('auth', {
   state: () => {
     const token = getToken() ?? ''
     const claims = token ? parseJwt(token) : {}
-    const role = claims.role as string[] | string | undefined
+    const role = (claims.role ?? claims['http://schemas.microsoft.com/ws/2008/06/identity/claims/role']) as string[] | string | undefined
     return {
       token,
       /** 優先取名字聲明，否則用 subject */
@@ -34,7 +34,7 @@ export const useAuthStore = defineStore('auth', {
       this.token = token
       const claims = parseJwt(token)
       this.username = (claims.name as string) ?? (claims.unique_name as string) ?? (claims.sub as string) ?? username
-      const role = claims.role
+      const role = claims.role ?? claims['http://schemas.microsoft.com/ws/2008/06/identity/claims/role']
       this.roles = Array.isArray(role) ? role : role ? [role] : []
     },
     logout() {

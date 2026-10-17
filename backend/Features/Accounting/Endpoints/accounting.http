@@ -1,0 +1,19 @@
+@baseUrl = http://localhost:5209
+@token = REPLACE_WITH_LOCAL_ADMIN_TOKEN
+@receiptId = REPLACE_WITH_RECEIPT_ID
+
+### Configuration status
+GET {{baseUrl}}/api/accounting/status
+Authorization: Bearer {{token}}
+
+### All matching receipts, dates inclusive
+GET {{baseUrl}}/api/accounting/receipts?start=2026-01-01&end=2026-12-31&page=1&pageSize=20
+Authorization: Bearer {{token}}
+
+### Recognize saved image
+POST {{baseUrl}}/api/accounting/receipts/{{receiptId}}/recognize
+Authorization: Bearer {{token}}
+
+### Download all matching original images, not just a page
+GET {{baseUrl}}/api/accounting/receipts/export?start=2026-01-01&end=2026-12-31&isConfirmed=true
+Authorization: Bearer {{token}}

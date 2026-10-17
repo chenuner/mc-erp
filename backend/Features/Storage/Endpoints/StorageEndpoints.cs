@@ -9,6 +9,12 @@ public static class StorageEndpoints
     public static void MapStorageEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/storage").WithTags("Storage");
+        group.AddEndpointFilter(async (context, next) =>
+        {
+            try { return await next(context); }
+            catch (UnauthorizedAccessException) { return TypedResults.Forbid(); }
+            catch (InvalidOperationException exception) { return TypedResults.Problem(exception.Message, statusCode: 400); }
+        });
 
         // 文件
         group.MapGet("/files", ListFilesAsync).RequireAuthorization();

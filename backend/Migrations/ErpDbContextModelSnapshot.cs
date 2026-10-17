@@ -22,6 +22,109 @@ namespace MC.Erp.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("MC.Erp.Features.Accounting.Entities.Receipt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTime?>("ConfirmedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ConfirmedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CurrencyCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("DocumentTypeDictId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("FileItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("InvoiceNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("IsConfirmed")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("ManuallyEdited")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("MerchantName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("OcrError")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("OcrResultJson")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("OcrStartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("OcrStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("OcrText")
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly?>("ReceiptDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Remark")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<Guid?>("SiteCategoryDictId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SiteId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentTypeDictId");
+
+                    b.HasIndex("FileItemId")
+                        .IsUnique();
+
+                    b.HasIndex("ReceiptDate");
+
+                    b.HasIndex("SiteCategoryDictId", "ReceiptDate");
+
+                    b.HasIndex("SiteId", "ReceiptDate");
+
+                    b.ToTable("accounting_receipts", (string)null);
+                });
+
             modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.AttendanceRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -452,6 +555,40 @@ namespace MC.Erp.Migrations
                         .HasDatabaseName("idx_sys_dict_group_name");
 
                     b.ToTable("sys_dict", (string)null);
+                });
+
+            modelBuilder.Entity("MC.Erp.Features.Accounting.Entities.Receipt", b =>
+                {
+                    b.HasOne("MC.Erp.Features.System.Entities.SysDict", "DocumentTypeDict")
+                        .WithMany()
+                        .HasForeignKey("DocumentTypeDictId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MC.Erp.Features.Storage.Entities.FileItem", "FileItem")
+                        .WithOne()
+                        .HasForeignKey("MC.Erp.Features.Accounting.Entities.Receipt", "FileItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MC.Erp.Features.System.Entities.SysDict", "SiteCategoryDict")
+                        .WithMany()
+                        .HasForeignKey("SiteCategoryDictId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("MC.Erp.Features.Attendance.Entities.Site", "Site")
+                        .WithMany()
+                        .HasForeignKey("SiteId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("DocumentTypeDict");
+
+                    b.Navigation("FileItem");
+
+                    b.Navigation("Site");
+
+                    b.Navigation("SiteCategoryDict");
                 });
 
             modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.AttendanceRecord", b =>

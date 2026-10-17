@@ -51,7 +51,8 @@
 | 技術 | 狀態 | 說明 |
 |------|------|------|
 | IHttpClientFactory | ✅ 已採納 | 調用外部考勤接口，由基礎設施層統一管理 CancellationToken |
-| OCR 服務（外部） | ✅ 已採納 | 收據拍照識別，接口抽象為 `IOcrService`，待選型 Azure / 雲廠商 |
+| OCR 服務（外部） | ✅ 已採納 | Azure Document Intelligence 收據 / 發票識別，接口抽象為 `IOcrService` |
+| Azure.AI.DocumentIntelligence | ✅ 已採納 | 官方 C# SDK 1.0.0，API 2024-11-30；收據及發票預建模型 |
 | 本地文件存儲 | ✅ 已採納 | MVP 階段文件存本地磁盤，抽象為 `IFileStorage` 接口，未來換對象存儲只需改 DI |
 
 ### 日誌

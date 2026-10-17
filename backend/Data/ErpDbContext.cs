@@ -1,3 +1,4 @@
+using MC.Erp.Features.Accounting.Entities;
 using MC.Erp.Features.Attendance.Entities;
 using MC.Erp.Features.Identity.Entities;
 using MC.Erp.Features.Storage.Entities;
@@ -26,9 +27,32 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
 
     // Storage
     public DbSet<FileItem> FileItems => Set<FileItem>();
+    public DbSet<Receipt> Receipts => Set<Receipt>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<Receipt>(entity =>
+        {
+            entity.ToTable("accounting_receipts");
+            entity.HasQueryFilter(receipt => !receipt.IsDeleted);
+            entity.Property(receipt => receipt.Amount).HasPrecision(18, 2);
+            entity.Property(receipt => receipt.CurrencyCode).HasMaxLength(3);
+            entity.Property(receipt => receipt.MerchantName).HasMaxLength(255);
+            entity.Property(receipt => receipt.InvoiceNumber).HasMaxLength(100);
+            entity.Property(receipt => receipt.Remark).HasMaxLength(255);
+            entity.Property(receipt => receipt.OcrStatus).HasMaxLength(20);
+            entity.Property(receipt => receipt.OcrError).HasMaxLength(255);
+            entity.Property(receipt => receipt.Version).IsConcurrencyToken();
+            entity.HasIndex(receipt => receipt.FileItemId).IsUnique();
+            entity.HasIndex(receipt => receipt.ReceiptDate);
+            entity.HasIndex(receipt => new { receipt.SiteId, receipt.ReceiptDate });
+            entity.HasIndex(receipt => new { receipt.SiteCategoryDictId, receipt.ReceiptDate });
+            entity.HasOne(receipt => receipt.FileItem).WithOne().HasForeignKey<Receipt>(receipt => receipt.FileItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(receipt => receipt.Site).WithMany().HasForeignKey(receipt => receipt.SiteId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(receipt => receipt.DocumentTypeDict).WithMany().HasForeignKey(receipt => receipt.DocumentTypeDictId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(receipt => receipt.SiteCategoryDict).WithMany().HasForeignKey(receipt => receipt.SiteCategoryDictId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         // Identity 模塊
         modelBuilder.Entity<User>(e =>
         {

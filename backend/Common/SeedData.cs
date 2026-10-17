@@ -1,6 +1,7 @@
 using MC.Erp.Common.Security;
 using MC.Erp.Data;
 using MC.Erp.Features.Identity.Entities;
+using MC.Erp.Features.System.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace MC.Erp.Common;
@@ -14,6 +15,25 @@ public static class SeedData
         var db = sp.GetRequiredService<ErpDbContext>();
 
         await db.Database.MigrateAsync();
+
+        var accountingDicts = new (string Group, string Value, string Label)[]
+        {
+            ("AccountingDocumentType", "receipt", "收據"),
+            ("AccountingDocumentType", "invoice", "發票"),
+            ("Accounting", "pending", "待分類"),
+            ("Accounting", "materials", "材料"),
+            ("Accounting", "transport", "運輸"),
+            ("Accounting", "rental", "租賃"),
+            ("Accounting", "meals", "餐費"),
+            ("Accounting", "fuel", "燃料"),
+            ("Accounting", "other", "其他")
+        };
+        var existing = await db.SysDicts.IgnoreQueryFilters()
+            .Where(dict => dict.GroupName == "Accounting" || dict.GroupName == "AccountingDocumentType").ToListAsync();
+        foreach (var (group, value, label) in accountingDicts)
+            if (!existing.Any(dict => dict.GroupName == group && dict.Value == value))
+                db.SysDicts.Add(new SysDict { GroupName = group, Value = value, Label = label, Sort = Array.FindIndex(accountingDicts, item => item.Value == value), Enabled = true });
+        await db.SaveChangesAsync();
 
         if (await db.Users.AnyAsync())
             return;

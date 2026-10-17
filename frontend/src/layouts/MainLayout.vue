@@ -27,6 +27,7 @@ const menus: MenuItem[] = [
   { path: '/accounting', name: 'accounting', title: '會計收據', icon: 'receipt' },
   { path: '/storage', name: 'storage', title: '地盤文件', icon: 'hard-drive' },
 ]
+const visibleMenus = computed(() => menus.filter(menu => menu.name !== 'accounting' || auth.roles.includes('Admin')))
 
 const systemMenus: MenuItem[] = [
   { path: '/system/categories', name: 'system-categories', title: '系統字典', icon: 'bookmark' },
@@ -60,7 +61,7 @@ async function handleLogout() {
         <span v-show="!menuCollapsed" class="brand-name">MC ERP</span>
       </div>
       <el-menu class="mc-menu" :collapse="menuCollapsed" :default-active="activeMenu" :collapse-transition="false">
-        <el-menu-item v-for="m in menus" :key="m.name" :index="m.name" @click="router.push(m.path)">
+        <el-menu-item v-for="m in visibleMenus" :key="m.name" :index="m.name" @click="router.push(m.path)">
           <AppIcon :name="m.icon" :size="18" />
           <template #title>{{ m.title }}</template>
         </el-menu-item>

@@ -64,12 +64,17 @@ public static class SystemEndpoints
             : TypedResults.Ok(new SysDictDto(dict.Id, dict.GroupName, dict.Label, dict.Value, dict.Sort, dict.Enabled, dict.Remark));
     }
 
-    private static async Task<Results<NoContent, NotFound>> DeleteSysDictAsync(
+    private static async Task<Results<NoContent, NotFound, ProblemHttpResult>> DeleteSysDictAsync(
         Guid id, SysDictService svc, CancellationToken ct = default)
     {
-        return await svc.DeleteAsync(id, ct)
-            ? TypedResults.NoContent()
-            : TypedResults.NotFound();
+        try
+        {
+            return await svc.DeleteAsync(id, ct) ? TypedResults.NoContent() : TypedResults.NotFound();
+        }
+        catch (InvalidOperationException exception)
+        {
+            return TypedResults.Problem(exception.Message, statusCode: 409);
+        }
     }
 }
 

@@ -1,6 +1,17 @@
 import request from './request'
 import type { PagedResult } from './system'
 
+export interface SiteDto {
+  id: string
+  name: string
+  address: string | null
+  isActive: boolean
+}
+
+export async function listSites(): Promise<SiteDto[]> {
+  return await request.get('/attendance/sites') as SiteDto[]
+}
+
 export interface PayrollFields {
   workDays: number
   laborLeaveDays: number

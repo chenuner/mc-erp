@@ -22,7 +22,7 @@ request.interceptors.request.use((config) => {
 
 request.interceptors.response.use(
   (response) => response.data,
-  (error) => {
+  async (error) => {
     const status = error.response?.status
     if (status === 401) {
       clearToken()
@@ -30,6 +30,10 @@ request.interceptors.response.use(
         location.href = '/login'
       }
     } else {
+      if (error.response?.data instanceof Blob && error.response.data.type.includes('json')) {
+        try { error.response.data = JSON.parse(await error.response.data.text()) }
+        catch { /* 非 JSON 響應沿用通用提示 */ }
+      }
       const detail = error.response?.data?.detail ?? error.response?.data
       const msg = typeof detail === 'string' && detail ? detail : '請求失敗，請稍後再試'
       ElMessage.error(msg)

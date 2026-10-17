@@ -14,7 +14,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:5209',
+        target: process.env.MC_ERP_API_TARGET || 'http://localhost:5209',
         changeOrigin: true,
       },
     },
