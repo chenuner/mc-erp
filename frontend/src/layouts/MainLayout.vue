@@ -95,8 +95,8 @@ async function handleLogout() {
         </el-tooltip>
         <el-dropdown>
           <span class="user-chip">
-            <el-avatar :size="28" class="user-avatar">{{ auth.username.slice(0, 1).toUpperCase() }}</el-avatar>
-            <span class="user-name">{{ auth.username || '未知用戶' }}</span>
+            <el-avatar :size="28" class="user-avatar">{{ auth.displayName.slice(0, 1).toUpperCase() }}</el-avatar>
+            <span class="user-name">{{ auth.displayName || '未知用戶' }}</span>
             <AppIcon name="chevron-down" :size="14" />
           </span>
           <template #dropdown>

@@ -157,6 +157,7 @@ User ─┬─ UserRole ── Role ── RolePermission ── Permission
 - **UserRole** — 用戶-角色多對多
 - **RolePermission** — 角色-權限多對多
 - **JWT** — 登錄後簽發，包含角色和權限信息
+- **身份展示** — `sub` 是用戶 ID，不用作姓名。前端 `username` 讀取名字聲明（兼容 `ClaimTypes.Name` 的完整 URI）；`displayName` 優先讀取 JWT 的 `display_name`，未設顯示名或使用舊令牌時回退到用戶名。JWT payload 按 UTF-8 解碼，僅供展示，不代替後端驗證。顯示名變更後需重新登錄取得新令牌。
 - **CurrentUser 上下文** — 通過 ASP.NET Core 的 ClaimsPrincipal 獲取，業務代碼直接用
 
 ---

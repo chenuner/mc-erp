@@ -21,6 +21,6 @@ public sealed class AuthService(
         var roles = await roleRepo.GetRoleNamesAsync(user.Id, ct);
         var permissions = await userRepo.GetPermissionsAsync(user.Id, ct);
 
-        return tokenGenerator.Generate(user.Id, user.Username, roles, permissions);
+        return tokenGenerator.Generate(user.Id, user.Username, roles, permissions, user.DisplayName);
     }
 }

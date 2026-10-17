@@ -10,7 +10,7 @@ public sealed class JwtTokenGenerator(IOptions<JwtOptions> options) : IJwtTokenG
 {
     private readonly JwtOptions _options = options.Value;
 
-    public string Generate(Guid userId, string username, IEnumerable<string> roles, IEnumerable<string> permissions)
+    public string Generate(Guid userId, string username, IEnumerable<string> roles, IEnumerable<string> permissions, string? displayName = null)
     {
         var claims = new List<Claim>
         {
@@ -19,6 +19,9 @@ public sealed class JwtTokenGenerator(IOptions<JwtOptions> options) : IJwtTokenG
             new(ClaimTypes.Name, username),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
+
+        if (!string.IsNullOrWhiteSpace(displayName))
+            claims.Add(new Claim("display_name", displayName));
 
         foreach (var role in roles)
             claims.Add(new Claim(ClaimTypes.Role, role));

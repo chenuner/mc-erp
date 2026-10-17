@@ -37,7 +37,7 @@ function go(path: string) {
     <!-- 歡迎橫幅 -->
     <section class="hero mc-card">
       <div class="hero-text">
-        <h1 class="hero-title">{{ auth.username ? `你好，${auth.username}` : '你好' }}</h1>
+        <h1 class="hero-title">{{ auth.displayName ? `你好，${auth.displayName}` : '你好' }}</h1>
         <p class="hero-sub">一體化平台，四大模組待業務需求接入。</p>
       </div>
       <div class="hero-deco" />
