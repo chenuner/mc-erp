@@ -124,11 +124,12 @@ app.UseAuthorization();
 app.MapHealthChecks("/health");
 
 // API 文檔
-if (app.Environment.IsDevelopment())
-{
+// 禁止这操作，必须要在所有环境下都启用
+// if (app.Environment.IsDevelopment())
+// {
     app.MapOpenApi();
     app.MapScalarApiReference();
-}
+// }
 
 // 端點
 app.MapIdentityEndpoints();

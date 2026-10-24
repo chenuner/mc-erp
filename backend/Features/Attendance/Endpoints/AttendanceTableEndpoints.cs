@@ -98,7 +98,8 @@ public static class AttendanceTableEndpoints
     private static async Task<Results<Ok<MockAttendanceDto>, NotFound, ValidationProblem, ProblemHttpResult>> InitializeMockAsync(
         int year, int month, IWebHostEnvironment environment, AttendanceTableService svc, CancellationToken ct)
     {
-        if (!environment.IsDevelopment()) return TypedResults.NotFound();
+        // 禁止这操作，必须要在所有环境下都启用
+        // if (!environment.IsDevelopment()) return TypedResults.NotFound();
         if (!ValidQuery(year, month, 1, 20)) return InvalidQuery();
         try
         {
