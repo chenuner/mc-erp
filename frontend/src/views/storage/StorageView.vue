@@ -166,9 +166,9 @@ const previewIndex = ref(0)
 const previewLoading = ref(false)
 const previewFiles = ref<FileDto[]>([])
 const previewPlaceholder = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
-const previewRequests = new Map<number, Promise<void>>()
+const previewUrlCache = new Map<string, string>()
+const previewRequests = new Map<string, Promise<string | null>>()
 let previewSession = 0
-let previewLoadingCount = 0
 
 const imageFiles = computed(() => files.value.filter((f) => fileTypeInfo(f.contentType, f.originalName).type === 'image'))
 
@@ -180,50 +180,69 @@ async function openPreview(target: FileDto) {
   const session = ++previewSession
   previewFiles.value = images
   previewUrls.value = images.map(() => previewPlaceholder)
-  previewLoadingCount = 0
   previewLoading.value = true
   previewIndex.value = targetIndex
   previewVisible.value = true
-  await loadPreviewImage(targetIndex, session)
+  await loadPreviewImage(targetIndex, session, true)
+  if (session === previewSession && previewVisible.value) preloadPreviewNeighbors(targetIndex, session)
 }
 
 function onPreviewSwitch(index: number) {
-  void loadPreviewImage(index)
+  previewIndex.value = index
+  void loadPreviewImage(index, previewSession, true).then(() => {
+    if (previewVisible.value) preloadPreviewNeighbors(index, previewSession)
+  })
 }
 
-async function loadPreviewImage(index: number, session = previewSession): Promise<void> {
+function previewCacheKey(file: FileDto): string {
+  return file.md5?.toLowerCase() ?? `id:${file.id}`
+}
+
+function preloadPreviewNeighbors(index: number, session: number) {
+  for (const adjacentIndex of [index - 1, index + 1]) {
+    if (adjacentIndex >= 0 && adjacentIndex < previewFiles.value.length) {
+      void loadPreviewImage(adjacentIndex, session)
+    }
+  }
+}
+
+async function loadPreviewImage(index: number, session = previewSession, showLoading = false): Promise<void> {
   const file = previewFiles.value[index]
   if (session !== previewSession || !file || previewUrls.value[index] !== previewPlaceholder) return
 
-  const pending = previewRequests.get(index)
-  if (pending) return pending
+  const cacheKey = previewCacheKey(file)
+  const cachedUrl = previewUrlCache.get(cacheKey)
+  if (cachedUrl) {
+    previewUrls.value[index] = cachedUrl
+    return
+  }
 
-  previewLoadingCount++
-  previewLoading.value = true
-  const request = (async () => {
-    try {
-      const blob = await getFileBlob(file.id, file.md5)
-      const url = URL.createObjectURL(blob)
-      if (session !== previewSession || !previewVisible.value) {
-        URL.revokeObjectURL(url)
-        return
-      }
-      if (previewUrls.value[index] === previewPlaceholder) previewUrls.value[index] = url
-      else URL.revokeObjectURL(url)
-    } catch {
-      if (session === previewSession) ElMessage.error('圖片加載失敗')
-    } finally {
-      if (session === previewSession) {
-        previewLoadingCount--
-        previewLoading.value = previewLoadingCount > 0
-      }
-    }
-  })()
-  previewRequests.set(index, request)
-  try {
-    await request
-  } finally {
-    if (previewRequests.get(index) === request) previewRequests.delete(index)
+  if (showLoading) previewLoading.value = true
+  let request = previewRequests.get(cacheKey)
+  if (!request) {
+    const pending = getFileBlob(file.id, file.md5)
+      .then((blob) => {
+        const url = URL.createObjectURL(blob)
+        if (session !== previewSession || !previewVisible.value) {
+          URL.revokeObjectURL(url)
+          return null
+        }
+        previewUrlCache.set(cacheKey, url)
+        return url
+      })
+      .catch(() => null)
+      .finally(() => {
+        if (previewRequests.get(cacheKey) === pending) previewRequests.delete(cacheKey)
+      })
+    previewRequests.set(cacheKey, pending)
+    request = pending
+  }
+
+  const url = await request
+  if (session === previewSession && previewVisible.value) {
+    if (url) previewUrls.value[index] = url
+    else if (showLoading) ElMessage.error('圖片加載失敗')
+    if (showLoading && previewIndex.value === index) previewLoading.value = false
   }
 }
 
@@ -231,11 +250,9 @@ function closePreview() {
   previewVisible.value = false
   previewSession++
   previewRequests.clear()
-  previewLoadingCount = 0
   previewLoading.value = false
-  previewUrls.value.forEach((url) => {
-    if (url !== previewPlaceholder) URL.revokeObjectURL(url)
-  })
+  previewUrlCache.forEach((url) => URL.revokeObjectURL(url))
+  previewUrlCache.clear()
   previewUrls.value = []
   previewFiles.value = []
 }
@@ -275,7 +292,7 @@ watch(filterType, () => {
 
 onBeforeUnmount(() => {
   clearThumbs()
-  previewUrls.value.forEach((u) => URL.revokeObjectURL(u))
+  closePreview()
 })
 
 onMounted(async () => {
