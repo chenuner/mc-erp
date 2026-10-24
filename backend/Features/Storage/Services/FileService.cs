@@ -60,6 +60,23 @@ public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentU
         return file is null ? null : (storage.OpenRead(file.StoredName), file);
     }
 
+    public async Task<(Stream Content, FileItem File)?> 按Md5下载Async(string md5, CancellationToken ct = default)
+    {
+        ct = context.HttpContext?.RequestAborted ?? ct;
+        if (md5.Length != 32 || !md5.All(Uri.IsHexDigit)) return null;
+
+        var normalizedMd5 = md5.ToLowerInvariant();
+        var query = db.FileItems.AsNoTracking().Include(f => f.TypeDict)
+            .Where(f => f.Md5 == normalizedMd5 && !f.IsDeleted);
+        if (!user.IsInRole("Admin"))
+        {
+            query = query.Where(f => f.TypeDict == null || f.TypeDict.GroupName != "Accounting");
+        }
+
+        var file = await query.FirstOrDefaultAsync(ct);
+        return file is null ? null : (storage.OpenRead(file.StoredName), file);
+    }
+
     public async Task 设置类别Async(Guid id, Guid type)
     {
         if (!user.IsInRole("Admin")) throw new UnauthorizedAccessException();

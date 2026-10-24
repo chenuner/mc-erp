@@ -9,6 +9,7 @@ export interface FileDto {
   sizeBytes: number
   uploaderName: string | null
   createdAt: string
+  md5: string | null
 }
 
 export async function listFiles(type?: string): Promise<FileDto[]> {
@@ -39,6 +40,9 @@ export async function deleteFile(id: string): Promise<void> {
 }
 
 /** 獲取文件二進制流（用於圖片預覽） */
-export async function getFileBlob(id: string): Promise<Blob> {
-  return (await request.get(`/storage/files/${id}/download`, { responseType: 'blob' })) as unknown as Blob
+export async function getFileBlob(id: string, md5: string | null): Promise<Blob> {
+  const path = md5
+    ? `/storage/files/by-md5/${encodeURIComponent(md5)}/download`
+    : `/storage/files/${id}/download`
+  return (await request.get(path, { responseType: 'blob' })) as unknown as Blob
 }
