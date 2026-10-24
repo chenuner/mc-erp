@@ -129,6 +129,16 @@ dotnet ef database update
 dotnet run --project tests/Accounting.Checks/Accounting.Checks.csproj -c Release
 ```
 
+## GitHub Actions
+
+工作流位於 [.github/workflows/ci.yml](.github/workflows/ci.yml)，推送及 Pull Request 時自動執行，也可在 GitHub 的 **Actions → CI → Run workflow** 手動觸發。
+
+- 後端：使用 .NET 10 進行 Release 構建，執行 Identity、Accounting 檢查及 PostgreSQL 16 整合檢查。
+- 前端：使用 Node.js 24、pnpm 10，按鎖文件安裝依賴，執行 TypeScript 檢查及 Vite 生產構建。
+- PostgreSQL 僅用於臨時 CI 環境，不連接正式資料庫，不需要設定 Azure 或部署密鑰；此工作流不會自動部署。
+
+將變更推送到 GitHub 後，可在 **Actions** 查看執行結果。若要禁止未通過檢查的 PR 合併，請在分支 Ruleset 中將 **Backend Build and Checks** 和 **Frontend Type Check and Build** 設為必要狀態檢查。
+
 ## License
 
 MIT
