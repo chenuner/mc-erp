@@ -24,7 +24,6 @@ const columns: { key: NumericField; label: string; money: boolean; width: number
 
 const auth = useAuthStore()
 const isAdmin = computed(() => auth.roles.includes('Admin'))
-const canMock = import.meta.env.DEV
 const activeTab = ref<'payroll' | 'punches'>('payroll')
 const now = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Hong_Kong', year: 'numeric', month: '2-digit' }).formatToParts(new Date())
 const month = ref(`${now.find(part => part.type === 'year')?.value}-${now.find(part => part.type === 'month')?.value}`)
@@ -194,7 +193,6 @@ async function savePunch() {
   <div class="attendance-view">
     <div class="page-header">
       <h1 class="page-title">考勤薪酬</h1>
-      <!-- <el-button v-if="canMock && isAdmin" :loading="initializing" :disabled="loading" @click="initializeMock"> -->
       <el-button @click="initializeMock">
         <AppIcon name="plus" :size="16" class="button-icon" />初始化模擬數據
       </el-button>
