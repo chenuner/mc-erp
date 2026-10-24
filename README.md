@@ -28,15 +28,22 @@ mc-erp/
 │   │   ├── Accounting/    # 會計/收據
 │   │   └── Storage/       # 文件/照片
 │   ├── Data/              # DbContext
+│   ├── Dockerfile          # 打包後端發布產物
+│   ├── MC.Erp.slnx        # 唯一 .NET 解決方案入口
 │   └── MC.Erp.csproj
 ├── frontend/              # Vue 3 前端
+│   ├── Dockerfile          # 打包前端構建產物
+│   ├── nginx.conf          # 靜態文件及 API 代理
 │   └── src/
 │       ├── api/           # API 接口
 │       ├── components/    # 通用組件
 │       ├── views/         # 頁面
 │       ├── stores/        # Pinia 狀態
 │       └── router/        # 路由
-├── docker-compose.yml     # 本地開發棧
+├── tests/                 # 後端檢查程序
+├── deploy/                # 初始化、部署腳本及操作說明
+├── docker-compose.yml     # 本地開發資料庫
+├── docker-compose.prod.yml # 生產前端、後端及資料庫
 ├── .gitignore
 └── README.md
 ```
@@ -68,6 +75,16 @@ mc-erp/
 - Node.js >= 20 + pnpm
 - PostgreSQL 16+
 - Docker（可選，用於本地 PostgreSQL）
+
+### 本地資料庫
+
+在倉庫根目錄執行：
+
+```bash
+docker compose up -d postgres
+```
+
+開發資料庫使用 `localhost:5433`，資料庫名 `mc_erp`，用戶及密碼均為 `postgres`，與後端開發配置一致。前後端在本機執行，生產環境使用獨立的 `docker-compose.prod.yml`，不要混用。
 
 ### 啟動後端
 

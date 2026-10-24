@@ -1,4 +1,4 @@
-name: mc-erp
+name: mc-erp-production
 
 services:
   postgres:
@@ -17,10 +17,8 @@ services:
       retries: 12
 
   backend:
-    image: mc-erp-backend:${RELEASE_ID:?Set RELEASE_ID}
-    build:
-      context: ..
-      dockerfile: deploy/backend.Dockerfile
+    image: mc-erp-backend:latest
+    build: ./backend
     restart: unless-stopped
     environment:
       ASPNETCORE_ENVIRONMENT: Production
@@ -45,10 +43,8 @@ services:
       start_period: 30s
 
   web:
-    image: mc-erp-web:${RELEASE_ID:?Set RELEASE_ID}
-    build:
-      context: ..
-      dockerfile: deploy/web.Dockerfile
+    image: mc-erp-web:latest
+    build: ./frontend
     restart: unless-stopped
     ports:
       - '${HTTP_PORT:-80}:80'

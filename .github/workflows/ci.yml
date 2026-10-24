@@ -43,10 +43,10 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Restore backend
-        run: dotnet restore MC.Erp.slnx
+        run: dotnet restore backend/MC.Erp.slnx
 
       - name: Build backend
-        run: dotnet build MC.Erp.slnx --configuration Release --no-restore
+        run: dotnet build backend/MC.Erp.slnx --configuration Release --no-restore
 
       - name: Run identity checks
         run: dotnet run --project tests/Identity.Checks/Identity.Checks.csproj --configuration Release
@@ -55,13 +55,13 @@ jobs:
         run: dotnet run --project tests/Accounting.Checks/Accounting.Checks.csproj --configuration Release -- --integration
 
       - name: Publish backend
-        run: dotnet publish backend/MC.Erp.csproj --configuration Release --no-restore --output .publish-backend
+        run: dotnet publish backend/MC.Erp.csproj --configuration Release --no-restore --output "$RUNNER_TEMP/publish-backend"
 
       - name: Upload backend
         uses: actions/upload-artifact@v6
         with:
           name: backend
-          path: .publish-backend/
+          path: ${{ runner.temp }}/publish-backend/
           if-no-files-found: error
           retention-days: 7
 
@@ -123,17 +123,19 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: backend
-          path: release/backend
+          path: release/backend/publish
 
       - name: Download frontend
         uses: actions/download-artifact@v7
         with:
           name: frontend
-          path: release/frontend
+          path: release/frontend/dist
 
       - name: Package release
         run: |
-          cp -r deploy release/deploy
+          cp backend/Dockerfile release/backend/
+          cp frontend/Dockerfile frontend/nginx.conf release/frontend/
+          cp docker-compose.prod.yml release/
           bash -n deploy/bootstrap.sh
           bash -n deploy/deploy.sh
           tar -czf release.tar.gz -C release .
@@ -154,5 +156,5 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$key"
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$hosts"
           options=(-i "$key" -o "UserKnownHostsFile=$hosts" -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=20)
-          scp "${options[@]}" -P "$DEPLOY_PORT" release.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/opt/mc-erp/incoming/$GITHUB_SHA.tar.gz"
-          ssh "${options[@]}" -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- '$GITHUB_SHA'" < deploy/deploy.sh
+          scp "${options[@]}" -P "$DEPLOY_PORT" release.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/opt/mc-erp/release.tar.gz"
+          ssh "${options[@]}" -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "bash -s" < deploy/deploy.sh

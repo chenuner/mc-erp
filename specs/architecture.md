@@ -67,6 +67,8 @@
 
 ```
 backend/
+├── MC.Erp.slnx                # 唯一 .NET 解決方案入口
+├── Dockerfile                  # 打包 CI 發布產物
 ├── MC.Erp.csproj
 ├── Program.cs                  # 入口：DI 註冊 + Middleware + Endpoints
 ├── appsettings.json            # 配置
@@ -113,6 +115,8 @@ frontend/
 │   ├── App.vue
 │   └── main.ts
 ├── package.json
+├── Dockerfile                  # 打包 CI 構建產物
+├── nginx.conf                  # 生產靜態文件與 API 代理
 ├── vite.config.ts
 └── tsconfig.json
 ```

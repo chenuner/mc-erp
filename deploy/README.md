@@ -2,6 +2,8 @@
 
 默认分支构建和检查成功后，GitHub Actions 通过 SSH 上传产物，在服务器使用 Docker Compose 启动 PostgreSQL 16、.NET 10 后端及 Nginx 前端。服务器不需要安装 .NET、Node.js 或 pnpm，也不需要仓库访问令牌。
 
+只有两个环境：根目录 `docker-compose.yml` 启动本地开发数据库，`docker-compose.prod.yml` 启动生产前后端及数据库。生产 Dockerfile 位于 `backend/` 和 `frontend/`，只打包 GitHub 已构建的产物，不在服务器编译源码。
+
 ## 1. 首次初始化服务器
 
 先将本次部署代码提交、推送到 GitHub。尚未配置部署参数时，首次 Deploy Production 失败是预期行为；配置完成后重新运行整个工作流。
@@ -16,7 +18,25 @@ cd mc-erp
 sudo bash deploy/bootstrap.sh
 ```
 
-脚本创建 `deploy` 用户、部署专用 SSH 密钥和 `/opt/mc-erp/shared/.env`。重复运行不会重置密码。Docker 用户组具有等同 root 的权限，应严格保护部署密钥和 GitHub 默认分支。
+脚本只安装 Docker 及 Compose，使用 Ubuntu 已有的 SSH 和 OpenSSL；创建 `deploy` 用户、部署专用 SSH 密钥和 `/opt/mc-erp/.env`。重复运行不会重置密码。Docker 用户组具有等同 root 的权限，应严格保护部署密钥和 GitHub 默认分支。
+
+已执行旧版 bootstrap、但尚未部署的服务器，在源码目录执行 `git pull` 后重新运行 `sudo bash deploy/bootstrap.sh`。脚本会将旧的 `shared/.env` 移到 `/opt/mc-erp/.env`，保留所有密码和 SSH 密钥，并移除旧版空目录。已配置的 GitHub Secrets 和 Variables 不需要修改。
+
+服务器固定目录为：
+
+```text
+/opt/mc-erp/
+├── .env                       # 服务器运行密钥
+└── app/                       # CI 上传的生产产物
+	├── docker-compose.prod.yml
+	├── backend/
+	│   ├── Dockerfile
+	│   └── publish/
+	└── frontend/
+		├── Dockerfile
+		├── nginx.conf
+		└── dist/
+```
 
 云服务器安全组放行 TCP 22、80。数据库和后端没有宿主机端口映射，不要放行 5432 或 8080。若已启用 UFW，先确保实际 SSH 端口已放行，再执行 `sudo ufw allow 80/tcp`。这里假定 SSH 端口为 22。
 
@@ -48,7 +68,7 @@ printf '%s ' '你的服务器公网IP'; sudo cut -d ' ' -f 1,2 /etc/ssh/ssh_host
 | `DEPLOY_USER` | `deploy`，不填时也默认使用此值 |
 | `DEPLOY_PORT` | `22`，非标准 SSH 端口按实际填写 |
 
-数据库密码、JWT 密钥和首次管理员密码已在服务器随机生成，不需要添加到 GitHub。可选 OCR 配置在服务器 `/opt/mc-erp/shared/.env` 中添加 `OCR_ENDPOINT`、`OCR_KEY` 后重新部署；不配置时可以手动录入票据。
+数据库密码、JWT 密钥和首次管理员密码已在服务器随机生成，不需要添加到 GitHub。可选 OCR 配置在服务器 `/opt/mc-erp/.env` 中添加 `OCR_ENDPOINT`、`OCR_KEY` 后重新部署；不配置时可以手动录入票据。
 
 ## 4. 部署和登录
 
@@ -59,7 +79,7 @@ GitHub → Actions → CI → Run workflow，选择仓库默认分支。需要�
 用户名为 `admin`，首次密码在服务器查看：
 
 ```bash
-sudo grep '^INITIAL_ADMIN_PASSWORD=' /opt/mc-erp/shared/.env
+sudo grep '^INITIAL_ADMIN_PASSWORD=' /opt/mc-erp/.env
 ```
 
 此配置的 HTTP 入口只适合首次连通验收。正式录入员工、薪酬、票据等真实数据前，必须配置域名及 HTTPS，避免公网明文传输密码和数据。尚未配置 HTTPS 时，可用 SSH 隧道从本机访问：
@@ -73,14 +93,13 @@ ssh -L 8080:127.0.0.1:80 你的管理用户@服务器公网IP
 ## 5. 日常运维
 
 ```bash
-cd /opt/mc-erp/current
-export RELEASE_ID=$(basename "$(pwd -P)")
-docker compose --env-file /opt/mc-erp/shared/.env -f deploy/compose.yml ps
-docker compose --env-file /opt/mc-erp/shared/.env -f deploy/compose.yml logs --tail 100
+cd /opt/mc-erp/app
+docker compose --env-file ../.env -f docker-compose.prod.yml ps
+docker compose --env-file ../.env -f docker-compose.prod.yml logs --tail 100
 ```
 
 以上命令使用 `deploy` 用户或 root 执行。健康检查失败时 Actions 会报告失败并输出容器日志；不会自动回滚数据库迁移。发布可能有短暂停机。
 
-数据库、上传原图和日志分别保存在 `mc-erp_pgdata`、`mc-erp_storage`、`mc-erp_logs` 卷中。更新或重启容器不会清空数据；禁止执行 `docker compose down -v`。备份必须覆盖数据库、原图及服务器 `.env`，迁移前先做备份。已有数据库的密码不能只通过修改 `.env` 更换，需要同步修改 PostgreSQL 角色密码。
+生产数据库、上传原图和日志分别保存在 `mc-erp-production_pgdata`、`mc-erp-production_storage`、`mc-erp-production_logs` 卷中，与本地开发数据隔离。更新或重启容器不会清空数据；禁止执行 `docker compose down -v`。备份必须覆盖数据库、原图及服务器 `.env`，迁移前先做备份。已有数据库的密码不能只通过修改 `.env` 更换，需要同步修改 PostgreSQL 角色密码。
 
-`INITIAL_ADMIN_PASSWORD` 仅在空数据库初始化时读取，更改该变量不会重置已有用户密码。历史发布目录和镜像保留在服务器，需要定期按磁盘情况清理，不要删除持久卷。
+`INITIAL_ADMIN_PASSWORD` 仅在空数据库初始化时读取，更改该变量不会重置已有用户密码。每次发布替换固定应用目录，不维护版本目录或软链接。旧的无标签镜像可以在确认部署成功后定期清理，不要删除持久卷。
