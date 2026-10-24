@@ -135,7 +135,9 @@ dotnet run --project tests/Accounting.Checks/Accounting.Checks.csproj -c Release
 
 - 後端：使用 .NET 10 進行 Release 構建，執行 Identity、Accounting 檢查及 PostgreSQL 16 整合檢查。
 - 前端：使用 Node.js 24、pnpm 10，按鎖文件安裝依賴，執行 TypeScript 檢查及 Vite 生產構建。
-- PostgreSQL 僅用於臨時 CI 環境，不連接正式資料庫，不需要設定 Azure 或部署密鑰；此工作流不會自動部署。
+- 檢查階段使用臨時 PostgreSQL，不連接正式資料庫。默認分支檢查通過後，透過 SSH 部署至 Ubuntu 24.04，啟動前端、後端及獨立的正式 PostgreSQL；PR 不部署。
+
+首次伺服器初始化命令、GitHub Secrets / Variables 清單及登入方法見 [deploy/README.md](deploy/README.md)。
 
 將變更推送到 GitHub 後，可在 **Actions** 查看執行結果。若要禁止未通過檢查的 PR 合併，請在分支 Ruleset 中將 **Backend Build and Checks** 和 **Frontend Type Check and Build** 設為必要狀態檢查。
 

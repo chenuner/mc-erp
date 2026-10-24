@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
 
 jobs:
   backend:
@@ -54,6 +54,17 @@ jobs:
       - name: Run accounting and integration checks
         run: dotnet run --project tests/Accounting.Checks/Accounting.Checks.csproj --configuration Release -- --integration
 
+      - name: Publish backend
+        run: dotnet publish backend/MC.Erp.csproj --configuration Release --no-restore --output .publish-backend
+
+      - name: Upload backend
+        uses: actions/upload-artifact@v6
+        with:
+          name: backend
+          path: .publish-backend/
+          if-no-files-found: error
+          retention-days: 7
+
   frontend:
     name: Frontend Type Check and Build
     runs-on: ubuntu-latest
@@ -82,3 +93,66 @@ jobs:
 
       - name: Type check and build frontend
         run: pnpm run build
+
+      - name: Upload frontend
+        uses: actions/upload-artifact@v6
+        with:
+          name: frontend
+          path: frontend/dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy:
+    name: Deploy Production
+    needs: [backend, frontend]
+    if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: production-deployment
+      cancel-in-progress: false
+    env:
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER || 'deploy' }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Download backend
+        uses: actions/download-artifact@v7
+        with:
+          name: backend
+          path: release/backend
+
+      - name: Download frontend
+        uses: actions/download-artifact@v7
+        with:
+          name: frontend
+          path: release/frontend
+
+      - name: Package release
+        run: |
+          cp -r deploy release/deploy
+          bash -n deploy/bootstrap.sh
+          bash -n deploy/deploy.sh
+          tar -czf release.tar.gz -C release .
+
+      - name: Upload and start services
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?Set repository variable DEPLOY_HOST}"
+          : "${DEPLOY_SSH_KEY:?Set repository secret DEPLOY_SSH_KEY}"
+          : "${DEPLOY_KNOWN_HOSTS:?Set repository secret DEPLOY_KNOWN_HOSTS}"
+          key="$RUNNER_TEMP/deploy_key"
+          hosts="$RUNNER_TEMP/deploy_known_hosts"
+          trap 'rm -f "$key" "$hosts"' EXIT
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$hosts"
+          options=(-i "$key" -o "UserKnownHostsFile=$hosts" -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=20)
+          scp "${options[@]}" -P "$DEPLOY_PORT" release.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/opt/mc-erp/incoming/$GITHUB_SHA.tar.gz"
+          ssh "${options[@]}" -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- '$GITHUB_SHA'" < deploy/deploy.sh

@@ -38,6 +38,11 @@ public static class SeedData
         if (await db.Users.AnyAsync())
             return;
 
+        var initialAdminPassword = sp.GetRequiredService<IConfiguration>()["Bootstrap:AdminPassword"]
+            ?? (sp.GetRequiredService<IHostEnvironment>().IsProduction()
+                ? throw new InvalidOperationException("Bootstrap:AdminPassword is required for the first production startup")
+                : "Admin@123");
+
         // 創建角色
         var adminRole = new Role { Name = "Admin", Description = "系統管理員" };
         var managerRole = new Role { Name = "Manager", Description = "主管" };
@@ -49,7 +54,7 @@ public static class SeedData
         var admin = new User
         {
             Username = "admin",
-            PasswordHash = hasher.Hash("Admin@123"),
+            PasswordHash = hasher.Hash(initialAdminPassword),
             DisplayName = "系統管理員",
             IsActive = true
         };
