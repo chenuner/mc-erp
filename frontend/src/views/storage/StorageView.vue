@@ -164,31 +164,80 @@ const previewVisible = ref(false)
 const previewUrls = ref<string[]>([])
 const previewIndex = ref(0)
 const previewLoading = ref(false)
+const previewFiles = ref<FileDto[]>([])
+const previewPlaceholder = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
+const previewRequests = new Map<number, Promise<void>>()
+let previewSession = 0
+let previewLoadingCount = 0
 
 const imageFiles = computed(() => files.value.filter((f) => fileTypeInfo(f.contentType, f.originalName).type === 'image'))
 
 async function openPreview(target: FileDto) {
   const images = imageFiles.value
-  if (images.length === 0) return
+  const targetIndex = images.findIndex((file) => file.id === target.id)
+  if (targetIndex < 0) return
+
+  const session = ++previewSession
+  previewFiles.value = images
+  previewUrls.value = images.map(() => previewPlaceholder)
+  previewLoadingCount = 0
   previewLoading.value = true
+  previewIndex.value = targetIndex
   previewVisible.value = true
+  await loadPreviewImage(targetIndex, session)
+}
+
+function onPreviewSwitch(index: number) {
+  void loadPreviewImage(index)
+}
+
+async function loadPreviewImage(index: number, session = previewSession): Promise<void> {
+  const file = previewFiles.value[index]
+  if (session !== previewSession || !file || previewUrls.value[index] !== previewPlaceholder) return
+
+  const pending = previewRequests.get(index)
+  if (pending) return pending
+
+  previewLoadingCount++
+  previewLoading.value = true
+  const request = (async () => {
+    try {
+      const blob = await getFileBlob(file.id, file.md5)
+      const url = URL.createObjectURL(blob)
+      if (session !== previewSession || !previewVisible.value) {
+        URL.revokeObjectURL(url)
+        return
+      }
+      if (previewUrls.value[index] === previewPlaceholder) previewUrls.value[index] = url
+      else URL.revokeObjectURL(url)
+    } catch {
+      if (session === previewSession) ElMessage.error('圖片加載失敗')
+    } finally {
+      if (session === previewSession) {
+        previewLoadingCount--
+        previewLoading.value = previewLoadingCount > 0
+      }
+    }
+  })()
+  previewRequests.set(index, request)
   try {
-    // 加載所有圖片的 object URL（用於查看器切換）
-    const urls = await Promise.all(images.map((f) => getFileBlob(f.id).then((b) => URL.createObjectURL(b))))
-    previewUrls.value = urls
-    previewIndex.value = Math.max(0, images.findIndex((f) => f.id === target.id))
-  } catch {
-    ElMessage.error('圖片加載失敗')
-    previewVisible.value = false
+    await request
   } finally {
-    previewLoading.value = false
+    if (previewRequests.get(index) === request) previewRequests.delete(index)
   }
 }
 
 function closePreview() {
   previewVisible.value = false
-  previewUrls.value.forEach((u) => URL.revokeObjectURL(u))
+  previewSession++
+  previewRequests.clear()
+  previewLoadingCount = 0
+  previewLoading.value = false
+  previewUrls.value.forEach((url) => {
+    if (url !== previewPlaceholder) URL.revokeObjectURL(url)
+  })
   previewUrls.value = []
+  previewFiles.value = []
 }
 
 // ---------- 網格視圖縮略圖 ----------
@@ -204,7 +253,7 @@ watch(
     )
     for (const f of pending) {
       try {
-        const blob = await getFileBlob(f.id)
+        const blob = await getFileBlob(f.id, f.md5)
         thumbUrls[f.id] = URL.createObjectURL(blob)
       } catch {
         /* 忽略單個失敗 */
@@ -403,6 +452,7 @@ onMounted(async () => {
           :url-list="previewUrls"
           :initial-index="previewIndex"
           hide-on-click-modal
+          @switch="onPreviewSwitch"
           @close="closePreview"
         />
       </div>

@@ -22,6 +22,7 @@ public static class StorageEndpoints
             .DisableAntiforgery()
             .RequireAuthorization();
         group.MapGet("/files/{id:guid}/download", DownloadFileAsync).RequireAuthorization();
+        group.MapGet("/files/by-md5/{md5}/download", DownloadFileByMd5Async).RequireAuthorization();
         group.MapDelete("/files/{id:guid}", DeleteFileAsync).RequireAuthorization();
     }
 
@@ -61,6 +62,15 @@ public static class StorageEndpoints
             : TypedResults.File(result.Value.Content, result.Value.File.ContentType, result.Value.File.OriginalName);
     }
 
+    private static async Task<Results<FileStreamHttpResult, NotFound>> DownloadFileByMd5Async(
+        string md5, FileService svc, CancellationToken ct)
+    {
+        var result = await svc.按Md5下载Async(md5, ct);
+        return result is null
+            ? TypedResults.NotFound()
+            : TypedResults.File(result.Value.Content, result.Value.File.ContentType, result.Value.File.OriginalName);
+    }
+
     private static async Task<Results<NoContent, NotFound>> DeleteFileAsync(
         Guid id, FileService svc, CancellationToken ct)
     {
@@ -71,8 +81,8 @@ public static class StorageEndpoints
 }
 
 public sealed record FileDto(
-    Guid Id, Guid? Type, string? TypeLabel, string OriginalName, string ContentType, long SizeBytes, string? UploaderName, DateTime CreatedAt)
+    Guid Id, Guid? Type, string? TypeLabel, string OriginalName, string ContentType, long SizeBytes, string? UploaderName, DateTime CreatedAt, string? Md5)
 {
     public static FileDto From(FileItem f) =>
-        new(f.Id, f.Type, f.TypeDict?.Label, f.OriginalName, f.ContentType, f.SizeBytes, f.UploaderName, f.CreatedAt);
+        new(f.Id, f.Type, f.TypeDict?.Label, f.OriginalName, f.ContentType, f.SizeBytes, f.UploaderName, f.CreatedAt, f.Md5);
 }
