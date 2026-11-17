@@ -62,7 +62,6 @@ mc-erp/
 - **PostgreSQL 16+** — 主數據庫
 - **EF Core 10** — ORM，Code First
 - **JWT** — 認證，Argon2id 密碼哈希
-- **Hangfire** — 定時拉取外部考勤數據
 - **Serilog** — 日誌（Console + File）
 - **Scalar.AspNetCore** — API 文檔
 

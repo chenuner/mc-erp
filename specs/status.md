@@ -14,9 +14,8 @@
 |------|------|------|------|
 | Identity | 登入、用戶/角色管理、JWT | ✅ 可用 | `Features/Identity` |
 | Attendance | 薪酬表 / 打卡表查詢、人工維護 | ✅ 可用 | `AttendanceTableService` |
-| Attendance | 自動計薪、MPF、OT 計算 | ❌ 未接線；`PayrollService` 未註冊，OT 是佔位 | — |
-| Attendance | 外部打卡 API 同步 | ❌ 目前回傳模擬資料 | `ExternalAttendanceApi` |
-| Attendance | Hangfire 定時同步 | ⚠️ 只有 server，沒有 job | `Program.cs` |
+| Attendance | 自動計薪、MPF、OT 計算 | ❌ 未實現；原 `PayrollService` 未註冊已移除（算法見 git 歷史） | — |
+| Attendance | 外部打卡 API 同步 | ❌ 未實現；`ExternalAttendanceApi` 只提供模擬資料 | — |
 | Attendance | 模擬資料初始化 | ✅ 所有環境可用（管理員）；刻意不關閉 | `POST /api/attendance/mock` |
 | Accounting | 上傳、OCR、人工確認、ZIP 匯出 | ✅ 可用（OCR 需配置才啟用） | `ReceiptService` |
 | Storage | 本地文件上傳 / 下載 / 刪除、MD5 | ✅ 可用 | `FileService` |
@@ -32,7 +31,6 @@
 |------|------|
 | 錯誤回應 | 三種寫法並存：endpoint try/catch、group endpoint filter、`ValidationProblem` |
 | 分頁型別 | `PagedResult` 在 Identity / System 各定義一份，Attendance 另有 `AttendancePage`；新代碼暫用 `PagedResult` |
-| 輸入驗證 | DataAnnotations 目前未自動生效（未呼叫 `AddValidation()`），只有考勤表 endpoint 手動驗證 |
 | 命名 | 部分服務用中文方法名（`上傳Async`），部分英文（`ListAsync`），且繁體 / 簡體混用 |
 
 ---
@@ -46,4 +44,5 @@
 | API 文件 | 所有環境開放 `/scalar` |
 | 本地資料庫 | `localhost:5433`，`docker compose up -d postgres` |
 | 一鍵驗證 | `pwsh -File scripts/check.ps1` |
+| 輸入驗證 | 全域 `AddValidation()`：DataAnnotations 自動生效，失敗回 400 ProblemDetails |
 | CI | PR 與手動觸發；只做 Release 建置與打包，不跑 Checks；部署僅限默認分支手動觸發 |

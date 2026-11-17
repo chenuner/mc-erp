@@ -40,13 +40,6 @@
 | JWT Bearer | 10.x | ✅ 已採納 | 身份認證 |
 | Isopoh.Cryptography.Argon2 | 2.0.x | ✅ 已採納 | 密碼哈希（Argon2id） |
 
-### 後台任務
-
-| 技術 | 版本 | 狀態 | 說明 |
-|------|------|------|------|
-| Hangfire | 1.8.x | ✅ 已採納 | 定時拉取外部考勤打卡數據 |
-| Hangfire.PostgreSql | 1.20.x | ✅ 已採納 | PostgreSQL 存储 |
-
 ### 外部集成
 
 | 技術 | 狀態 | 說明 |

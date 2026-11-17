@@ -45,12 +45,9 @@ public static class SystemEndpoints
             : TypedResults.Ok(new SysDictDto(dict.Id, dict.GroupName, dict.Label, dict.Value, dict.Sort, dict.Enabled, dict.Remark));
     }
 
-    private static async Task<Results<Created<SysDictDto>, BadRequest<string>>> CreateSysDictAsync(
+    private static async Task<Created<SysDictDto>> CreateSysDictAsync(
         CreateSysDictRequest req, SysDictService svc, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(req.GroupName) || string.IsNullOrWhiteSpace(req.Label) || string.IsNullOrWhiteSpace(req.Value))
-            return TypedResults.BadRequest("GroupName, Label and Value are required");
-
         var dict = await svc.CreateAsync(req.GroupName, req.Label, req.Value, req.Sort, req.Enabled, req.Remark, ct);
         return TypedResults.Created($"/api/system/dicts/{dict.Id}", new SysDictDto(dict.Id, dict.GroupName, dict.Label, dict.Value, dict.Sort, dict.Enabled, dict.Remark));
     }

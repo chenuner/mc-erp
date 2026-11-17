@@ -68,7 +68,7 @@ MC ERP — 香港建築管理公司 ERP 系統。簡單系統，不過度工程�
 2. 回傳 `TypedResults` + ProblemDetails，不要 `BadRequest<string>`
 3. 分頁先用 `PagedResult<T>`，不要新增第三個型別
 4. 權限明確：`RequireAuthorization("admin")` 或 `RequireAuthorization()`
-5. 輸入驗證要真的生效：`AddValidation()` 或 endpoint filter 內 `Validator.TryValidateObject`
+5. 輸入驗證：`AddValidation()` 已全域啟用，DTO 直接標 DataAnnotations（record 主構造參數同樣生效）
 6. 補一個 `.http` 範例，至少一個 Check
 7. 跑完驗證命令，把結果貼在 PR
 

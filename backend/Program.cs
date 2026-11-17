@@ -18,8 +18,6 @@ using MC.Erp.Features.System.Endpoints;
 using MC.Erp.Features.System.Repositories;
 using MC.Erp.Features.System.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Hangfire;
-using Hangfire.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
@@ -96,11 +94,6 @@ builder.Services.AddScoped<FileService>();
 builder.Services.AddScoped<ISysDictRepository, SysDictRepository>();
 builder.Services.AddScoped<SysDictService>();
 
-// Hangfire
-builder.Services.AddHangfire(config => config
-    .UsePostgreSqlStorage(o => o.UseNpgsqlConnection(builder.Configuration.GetConnectionString("Default"))));
-builder.Services.AddHangfireServer();
-
 // 健康檢查
 builder.Services.AddHealthChecks()
     .AddNpgSql(builder.Configuration.GetConnectionString("Default")!);
@@ -110,6 +103,9 @@ builder.Services.AddOpenApi();
 
 // 統一異常處理（ProblemDetails, RFC 9457）
 builder.Services.AddProblemDetails();
+
+// 輸入驗證：DataAnnotations 對所有 endpoint 自動生效，失敗回 400 ValidationProblem
+builder.Services.AddValidation();
 
 var app = builder.Build();
 

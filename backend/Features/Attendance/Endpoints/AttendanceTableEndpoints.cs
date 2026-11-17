@@ -40,10 +40,10 @@ public static class AttendanceTableEndpoints
         ["query"] = ["年份須為 2000 至 2099，月份須為 1 至 12，頁碼須為 1 至 100000，每頁須為 1 至 100。"]
     });
 
-    private static ValidationProblem? Validate(object request)
+    // DataAnnotations（[Range] / [MaxLength]）已由全域 AddValidation 驗證；這裡只補「最多兩位小數」規則。
+    private static ValidationProblem? ValidateDecimals(object request)
     {
         var errors = new List<ValidationResult>();
-        Validator.TryValidateObject(request, new ValidationContext(request), errors, true);
         foreach (var property in request.GetType().GetProperties())
         {
             if (property.GetValue(request) is decimal value && decimal.Round(value, 2) != value)
@@ -58,7 +58,7 @@ public static class AttendanceTableEndpoints
     private static async Task<Results<Ok<PayrollDto>, NotFound, ValidationProblem>> UpdatePayrollAsync(
         Guid id, UpdatePayrollRequest request, AttendanceTableService svc, CancellationToken ct)
     {
-        if (Validate(request) is { } invalid) return invalid;
+        if (ValidateDecimals(request) is { } invalid) return invalid;
         var row = await svc.GetPayrollByIdAsync(id, ct);
         if (row is null) return TypedResults.NotFound();
         row.WorkDays = request.WorkDays;
@@ -79,7 +79,7 @@ public static class AttendanceTableEndpoints
     private static async Task<Results<Ok<PunchDto>, NotFound, ValidationProblem>> UpdatePunchAsync(
         Guid id, UpdatePunchRequest request, AttendanceTableService svc, CancellationToken ct)
     {
-        if (Validate(request) is { } invalid) return invalid;
+        if (ValidateDecimals(request) is { } invalid) return invalid;
         if (request.ClockInTime.ToOffset(TimeSpan.FromHours(8)).Year is < 2000 or > 2099)
             return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["clockInTime"] = ["打卡年份須為 2000 至 2099。"] });
         if (request.ClockOutTime is { } end && end <= request.ClockInTime)
