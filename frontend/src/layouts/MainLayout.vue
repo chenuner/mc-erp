@@ -27,7 +27,8 @@ const menus: MenuItem[] = [
   { path: '/accounting', name: 'accounting', title: '會計收據', icon: 'receipt' },
   { path: '/storage', name: 'storage', title: '地盤文件', icon: 'hard-drive' },
 ]
-const visibleMenus = computed(() => menus.filter(menu => menu.name !== 'accounting' || auth.roles.includes('Admin')))
+const isAdmin = computed(() => auth.roles.includes('Admin'))
+const visibleMenus = computed(() => menus.filter(menu => menu.name !== 'accounting' || isAdmin.value))
 
 const systemMenus: MenuItem[] = [
   { path: '/system/categories', name: 'system-categories', title: '系統字典', icon: 'bookmark' },
@@ -65,7 +66,7 @@ async function handleLogout() {
           <AppIcon :name="m.icon" :size="18" />
           <template #title>{{ m.title }}</template>
         </el-menu-item>
-        <el-sub-menu index="system">
+        <el-sub-menu v-if="isAdmin" index="system">
           <template #title>
             <AppIcon name="settings" :size="18" />
             <span>系統設置</span>
