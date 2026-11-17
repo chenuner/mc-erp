@@ -1,9 +1,10 @@
 using System.Text.Json;
+using MC.Erp.Common;
+using MC.Erp.Common.Errors;
 using MC.Erp.Features.Accounting.Entities;
 using MC.Erp.Features.Accounting.Repositories;
 using MC.Erp.Features.Accounting.Services;
 using MC.Erp.Features.Storage.Services;
-using Microsoft.EntityFrameworkCore;
 
 namespace MC.Erp.Features.Accounting.Endpoints;
 
@@ -11,15 +12,8 @@ public static class AccountingEndpoints
 {
     public static void MapAccountingEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/accounting").WithTags("Accounting").RequireAuthorization("admin");
-        group.AddEndpointFilter(async (context, next) =>
-        {
-            try { return await next(context); }
-            catch (KeyNotFoundException exception) { return TypedResults.Problem(exception.Message, statusCode: 404); }
-            catch (InvalidOperationException exception) { return TypedResults.Problem(exception.Message, statusCode: 400); }
-            catch (DbUpdateConcurrencyException) { return TypedResults.Problem("資料已更新或識別進行中，請重新載入", statusCode: 409); }
-            catch (IOException) { return TypedResults.Problem("原圖讀取或打包失敗，請檢查文件存儲後重試", statusCode: 500); }
-        });
+        var group = app.MapGroup("/api/accounting").WithTags("Accounting").RequireAuthorization("admin")
+            .AddEndpointFilter<ExceptionProblemFilter>();
         group.MapGet("/status", (ReceiptService service) => TypedResults.Ok(new { ocrConfigured = service.OcrConfigured }));
         group.MapGet("/receipts", async (Guid? siteId, Guid? documentTypeDictId, Guid? type,
             Guid? siteCategoryDictId, DateOnly? start, DateOnly? end, bool? isConfirmed,
@@ -29,7 +23,8 @@ public static class AccountingEndpoints
             var currentPage = Math.Clamp(page ?? 1, 1, 1000000);
             var size = Math.Clamp(pageSize ?? 20, 1, 100);
             var result = await service.ListAsync(filter, currentPage, size);
-            return TypedResults.Ok(new { items = result.Items.Select(ReceiptResponse.From), result.Total, page = currentPage, pageSize = size });
+            return TypedResults.Ok(new PagedResult<ReceiptResponse>(
+                result.Items.Select(ReceiptResponse.From).ToList(), result.Total, currentPage, size));
         });
         group.MapPost("/receipts", async (Guid siteId, Guid documentTypeDictId, IFormFile file, ReceiptService service) =>
         {

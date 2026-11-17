@@ -111,6 +111,8 @@ var app = builder.Build();
 
 // 異常處理
 app.UseExceptionHandler();
+// 無 body 的 4xx/5xx 也轉成 ProblemDetails
+app.UseStatusCodePages();
 
 // 認證 & 授權
 app.UseAuthentication();

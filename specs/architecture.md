@@ -144,8 +144,8 @@ frontend/
 
 - RESTful 風格
 - 路由前綴：`/api/{module}`，如 `/api/attendance`、`/api/accounting`
-- 統一返回：`TypedResults` + ProblemDetails（RFC 9457）
-- 分頁：`page` + `pageSize` 參數，返回 `{ items, total, page, pageSize }`
+- 統一返回：`TypedResults` + ProblemDetails（RFC 9457）；業務異常直接 `throw`，由 `Common/Errors/ExceptionProblemFilter` 轉換
+- 分頁：`page` + `pageSize` 參數，統一返回 `Common/PagedResult<T>`（`{ items, total, page, pageSize }`）
 - 認證：Bearer JWT Token
 - 授權：基於角色的 Policy，`[Authorize(Policy = "...")]`
 

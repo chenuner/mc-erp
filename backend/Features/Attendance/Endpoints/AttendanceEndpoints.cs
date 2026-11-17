@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using MC.Erp.Common.Errors;
 using MC.Erp.Common.Security;
 using MC.Erp.Features.Attendance.Entities;
 using MC.Erp.Features.Attendance.Services;
@@ -11,6 +12,7 @@ public static class AttendanceEndpoints
     public static void MapAttendanceEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/attendance").WithTags("Attendance");
+        group.AddEndpointFilter<ExceptionProblemFilter>();
 
         // 工人
         group.MapGet("/workers", ListWorkersAsync).RequireAuthorization();

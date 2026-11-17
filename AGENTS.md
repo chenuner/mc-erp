@@ -65,8 +65,8 @@ MC ERP — 香港建築管理公司 ERP 系統。簡單系統，不過度工程�
 ## 新端點檢查清單
 
 1. 放 `Features/{Module}/Endpoints`，Service / Repository 分層
-2. 回傳 `TypedResults` + ProblemDetails，不要 `BadRequest<string>`
-3. 分頁先用 `PagedResult<T>`，不要新增第三個型別
+2. 回傳 `TypedResults` + ProblemDetails，不要 `BadRequest<string>`；業務異常直接 `throw`，由 `ExceptionProblemFilter` 統一轉換
+3. 分頁用 `Common/PagedResult<T>`，不要另定義第三個型別
 4. 權限明確：`RequireAuthorization("admin")` 或 `RequireAuthorization()`
 5. 輸入驗證：`AddValidation()` 已全域啟用，DTO 直接標 DataAnnotations（record 主構造參數同樣生效）
 6. 補一個 `.http` 範例，至少一個 Check

@@ -1,4 +1,6 @@
 using System.ComponentModel.DataAnnotations;
+using MC.Erp.Common;
+using MC.Erp.Common.Errors;
 using MC.Erp.Features.System.Entities;
 using MC.Erp.Features.System.Services;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -10,6 +12,7 @@ public static class SystemEndpoints
     public static void MapSystemEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/system").WithTags("System");
+        group.AddEndpointFilter<ExceptionProblemFilter>();
 
         // SysDict CRUD
         group.MapGet("/dicts", ListSysDictsAsync).RequireAuthorization();
@@ -79,4 +82,3 @@ public static class SystemEndpoints
 public sealed record CreateSysDictRequest([Required] string GroupName, [Required] string Label, [Required] string Value, int Sort = 0, bool Enabled = true, string? Remark = null);
 public sealed record UpdateSysDictRequest(string? Label, string? Value, int? Sort, bool? Enabled, string? Remark);
 public sealed record SysDictDto(Guid Id, string GroupName, string Label, string Value, int Sort, bool Enabled, string? Remark);
-public sealed record PagedResult<T>(List<T> Items, int Total, int Page, int PageSize);

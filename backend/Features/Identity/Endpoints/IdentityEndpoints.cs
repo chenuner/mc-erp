@@ -1,4 +1,6 @@
 using System.ComponentModel.DataAnnotations;
+using MC.Erp.Common;
+using MC.Erp.Common.Errors;
 using MC.Erp.Common.Security;
 using MC.Erp.Features.Identity.Services;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -10,6 +12,7 @@ public static class IdentityEndpoints
     public static void MapIdentityEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/identity").WithTags("Identity");
+        group.AddEndpointFilter<ExceptionProblemFilter>();
 
         // 登錄
         group.MapPost("/login", LoginAsync);
@@ -50,19 +53,12 @@ public static class IdentityEndpoints
             total, page, pageSize));
     }
 
-    private static async Task<Results<Created<UserDto>, BadRequest<string>>> CreateUserAsync(
+    private static async Task<Created<UserDto>> CreateUserAsync(
         CreateUserRequest req, UserService svc, CancellationToken ct)
     {
-        try
-        {
-            var user = await svc.CreateAsync(req.Username, req.Password, req.Email, req.DisplayName, ct);
-            return TypedResults.Created($"/api/identity/users/{user.Id}",
-                new UserDto(user.Id, user.Username, user.Email, user.DisplayName, user.IsActive));
-        }
-        catch (InvalidOperationException ex)
-        {
-            return TypedResults.BadRequest(ex.Message);
-        }
+        var user = await svc.CreateAsync(req.Username, req.Password, req.Email, req.DisplayName, ct);
+        return TypedResults.Created($"/api/identity/users/{user.Id}",
+            new UserDto(user.Id, user.Username, user.Email, user.DisplayName, user.IsActive));
     }
 
     private static async Task<Results<Ok<UserDto>, NotFound>> UpdateUserAsync(
@@ -99,19 +95,12 @@ public static class IdentityEndpoints
             total, page, pageSize));
     }
 
-    private static async Task<Results<Created<RoleDto>, BadRequest<string>>> CreateRoleAsync(
+    private static async Task<Created<RoleDto>> CreateRoleAsync(
         CreateRoleRequest req, RoleService svc, CancellationToken ct)
     {
-        try
-        {
-            var role = await svc.CreateAsync(req.Name, req.Description, ct);
-            return TypedResults.Created($"/api/identity/roles/{role.Id}",
-                new RoleDto(role.Id, role.Name, role.Description));
-        }
-        catch (InvalidOperationException ex)
-        {
-            return TypedResults.BadRequest(ex.Message);
-        }
+        var role = await svc.CreateAsync(req.Name, req.Description, ct);
+        return TypedResults.Created($"/api/identity/roles/{role.Id}",
+            new RoleDto(role.Id, role.Name, role.Description));
     }
 
     private static async Task<Results<Ok<RoleDto>, NotFound>> UpdateRoleAsync(
@@ -156,4 +145,3 @@ public sealed record CreateRoleRequest([Required] string Name, string? Descripti
 public sealed record UpdateRoleRequest(string? Name, string? Description);
 public sealed record UserDto(Guid Id, string Username, string? Email, string? DisplayName, bool IsActive);
 public sealed record RoleDto(Guid Id, string Name, string? Description);
-public sealed record PagedResult<T>(List<T> Items, int Total, int Page, int PageSize);

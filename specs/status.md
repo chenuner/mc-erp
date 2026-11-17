@@ -29,8 +29,6 @@
 
 | 項目 | 現況 |
 |------|------|
-| 錯誤回應 | 三種寫法並存：endpoint try/catch、group endpoint filter、`ValidationProblem` |
-| 分頁型別 | `PagedResult` 在 Identity / System 各定義一份，Attendance 另有 `AttendancePage`；新代碼暫用 `PagedResult` |
 | 命名 | 部分服務用中文方法名（`上傳Async`），部分英文（`ListAsync`），且繁體 / 簡體混用 |
 
 ---
@@ -45,4 +43,5 @@
 | 本地資料庫 | `localhost:5433`，`docker compose up -d postgres` |
 | 一鍵驗證 | `pwsh -File scripts/check.ps1` |
 | 輸入驗證 | 全域 `AddValidation()`：DataAnnotations 自動生效，失敗回 400 ProblemDetails |
+| 錯誤格式 | 統一 ProblemDetails：業務異常由 `ExceptionProblemFilter` 轉 400/403/404/409/500；空 body 的 4xx/5xx 由 `UseStatusCodePages` 補齊 |
 | CI | PR 與手動觸發；只做 Release 建置與打包，不跑 Checks；部署僅限默認分支手動觸發 |
