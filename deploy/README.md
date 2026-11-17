@@ -1,6 +1,6 @@
 # Ubuntu 24.04 部署
 
-默认分支构建和检查成功后，GitHub Actions 通过 SSH 上传产物，在服务器使用 Docker Compose 启动 PostgreSQL 16、.NET 10 后端及 Nginx 前端。服务器不需要安装 .NET、Node.js 或 pnpm，也不需要仓库访问令牌。
+在 GitHub Actions 手动触发、默认分支构建成功后，GitHub Actions 通过 SSH 上传产物，在服务器使用 Docker Compose 启动 PostgreSQL 16、.NET 10 后端及 Nginx 前端。服务器不需要安装 .NET、Node.js 或 pnpm，也不需要仓库访问令牌。
 
 只有两个环境：根目录 `docker-compose.yml` 启动本地开发数据库，`docker-compose.prod.yml` 启动生产前后端及数据库。生产 Dockerfile 位于 `backend/` 和 `frontend/`，只打包 GitHub 已构建的产物，不在服务器编译源码。
 
@@ -72,9 +72,9 @@ printf '%s ' '你的服务器公网IP'; sudo cut -d ' ' -f 1,2 /etc/ssh/ssh_host
 
 ## 4. 部署和登录
 
-GitHub → Actions → CI → Run workflow，选择仓库默认分支。需要重跑时重跑整个工作流，以便重新生成构建产物；也可以继续向默认分支推送提交。PR 不会部署。
+GitHub → Actions → CI → Run workflow，选择仓库默认分支。需要重跑时重新运行整个工作流（推送提交不会自动触发 CI），以便重新生成构建产物。PR 不会部署。
 
-等待 Backend Build and Checks、Frontend Type Check and Build、Deploy Production 全部通过，再打开 `http://服务器公网IP`。
+等待 Backend Build and Package、Frontend Build and Package、Deploy Production 全部通过，再打开 `http://服务器公网IP`。
 
 用户名为 `admin`，首次密码在服务器查看：
 

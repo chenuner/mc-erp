@@ -3,6 +3,8 @@
 > 決定"寫在哪"。分層、模組邊界、依賴流向、物理結構。
 >
 > 原則：**簡單分層，夠用就好。**
+>
+> 本文件描述目標設計；哪些已實現、哪些未接線見 [status.md](./status.md)。
 
 ---
 
@@ -52,8 +54,9 @@
 |------|------|---------|
 | **Identity** | 用戶、角色、權限、JWT 認證、密碼哈希 | User / Role / Permission / UserRole |
 | **Attendance** | 外部打卡數據拉取、工數統計、薪酬計算（MPF/OT）、月結報表 | AttendanceRecord / MonthlyWorkSummary / Worker |
-| **Accounting** | 收據拍照上傳、OCR 識別、支出按地盤分類、年度提取 | Receipt / ExpenseCategory / Site |
-| **Storage** | 雲盤文件管理、地盤照片存儲、按地盤/時間/事件分類、賬戶權限。文件存儲抽象為 `IFileStorage` 接口，MVP 階段用本地存儲實現，跑通後換對象存儲只需換實現 | FileItem / FilePermission / SitePhoto |
+| **Accounting** | 收據拍照上傳、OCR 識別、支出按地盤分類、年度提取 | Receipt（分類走 System 的 SysDict） |
+| **Storage** | 雲盤文件管理、地盤照片存儲、按地盤/時間/事件分類、賬戶權限。文件存儲抽象為 `IFileStorage` 接口，MVP 階段用本地存儲實現，跑通後換對象存儲只需換實現 | FileItem（FilePermission / SitePhoto 規劃中） |
+| **System** | 系統字典：支出分類、票據類型、文件類別等可配置項 | SysDict |
 
 ### 模組間通信
 
@@ -74,31 +77,34 @@ backend/
 ├── appsettings.json            # 配置
 ├── Common/                     # 公共基礎設施
 │   ├── Domain/                 # 基類：Entity / AuditableEntity
-│   ├── Infrastructure/         # EF Core 基類 / Repository 基類 / Middleware
-│   ├── Security/               # JWT / 認證擴展 / 當前用戶上下文
-│   └── Exceptions/             # 統一異常處理
+│   ├── Infrastructure/Ocr/     # IOcrService / Azure 實現
+│   ├── Security/               # JWT / 密碼哈希 / 當前用戶上下文
+│   └── SeedData.cs             # 啟動時遷移 + 初始管理員
 ├── Features/                   # 業務模組
 │   ├── Identity/
-│   │   ├── Endpoints/         # 登錄 / 用戶 CRUD / 角色管理
+│   │   ├── Endpoints/          # 登錄 / 用戶 CRUD / 角色管理
 │   │   ├── Services/           # AuthService / UserService / RoleService
-│   │   ├── Entities/           # User / Role / Permission
-│   │   └── Repositories/       # IUserRepository
+│   │   ├── Entities/           # User / Role / Permission / UserRole / RolePermission
+│   │   └── Repositories/       # IUserRepository / IRoleRepository + 實現
 │   ├── Attendance/
-│   │   ├── Endpoints/          # 工數查詢 / 月結報表
-│   │   ├── Services/           # AttendanceSyncService / PayrollService
-│   │   ├── Entities/           # AttendanceRecord / MonthlyWorkSummary / Worker
-│   │   ├── Repositories/       # IAttendanceRepository
-│   │   └── External/           # 外部打卡 API 客戶端
+│   │   ├── Endpoints/          # 工數查詢 / 月結報表 / 打卡表 / mock
+│   │   ├── Services/           # AttendanceServices / AttendanceTableService / 外部 API
+│   │   ├── Entities/           # AttendanceRecord / MonthlyWorkSummary / Worker / Site
+│   │   └── Repositories/       # IAttendanceRepository + 實現
 │   ├── Accounting/
-│   │   ├── Endpoints/          # 收據上傳 / 支出查詢
-│   │   ├── Services/           # ReceiptService / OcrService
-│   │   ├── Entities/           # Receipt / ExpenseCategory
-│   │   └── Repositories/
-│   └── Storage/
-│       ├── Endpoints/          # 文件上傳下載 / 權限管理
-│       ├── Services/           # IFileStorage / LocalStorageProvider / FileService / SitePhotoService
-│       ├── Entities/           # FileItem / FilePermission / SitePhoto
-│       └── Repositories/
+│   │   ├── Endpoints/          # 收據上傳 / 識別 / 確認 / 匯出
+│   │   ├── Services/           # ReceiptService / AccountingFileProtectionService
+│   │   ├── Entities/           # Receipt
+│   │   └── Repositories/       # ReceiptRepository
+│   ├── Storage/
+│   │   ├── Endpoints/          # 文件上傳下載
+│   │   ├── Services/           # IFileStorage / LocalFileStorage / FileService
+│   │   └── Entities/           # FileItem
+│   └── System/
+│       ├── Endpoints/          # 系統字典 CRUD
+│       ├── Services/           # SysDictService
+│       ├── Entities/           # SysDict
+│       └── Repositories/       # ISysDictRepository + 實現
 └── Data/
     └── ErpDbContext.cs         # 單一 DbContext，所有實體在這裡註冊
 

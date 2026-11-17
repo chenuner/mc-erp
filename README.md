@@ -18,8 +18,10 @@ mc-erp/
 ├── AGENTS.md              # AI 編程行為規範
 ├── specs/                 # 技術規範（唯一真理源）
 │   ├── README.md          # specs 導航
+│   ├── status.md          # 當前實現狀態
 │   ├── tech-stack.md      # 技術棧規範
-│   └── architecture.md    # 架構規範
+│   ├── architecture.md    # 架構規範
+│   └── design-system.md   # 前端設計系統
 ├── backend/               # ASP.NET Core 後端
 │   ├── Common/            # 公共基礎設施
 │   ├── Features/          # 業務模組
@@ -42,8 +44,13 @@ mc-erp/
 │       └── router/        # 路由
 ├── tests/                 # 後端檢查程序
 ├── deploy/                # 初始化、部署腳本及操作說明
+├── scripts/               # 本地驗證腳本
+│   └── check.ps1          # 一鍵 build + Checks + 前端建置
 ├── docker-compose.yml     # 本地開發資料庫
 ├── docker-compose.prod.yml # 生產前端、後端及資料庫
+├── global.json            # .NET SDK 版本
+├── Directory.Build.props  # 全倉編譯設定
+├── .editorconfig          # 格式約定
 ├── .gitignore
 └── README.md
 ```
@@ -94,7 +101,7 @@ dotnet restore
 dotnet run
 ```
 
-後端服務運行在 `https://localhost:5001`，API 文檔在 `/scalar`。
+後端服務運行在 `http://localhost:5209`（`https` profile 另開 `7224`），API 文檔在 `/scalar`。
 
 ### 啟動前端
 
@@ -104,7 +111,7 @@ pnpm install
 pnpm run dev
 ```
 
-前端運行在 `http://localhost:3000`。
+前端運行在 `http://localhost:5173`。
 
 ### 部署
 
@@ -118,7 +125,8 @@ pnpm run dev
 1. 閱讀 [specs/architecture.md](specs/architecture.md) 了解模組結構
 2. 在 `backend/Features/{ModuleName}/` 下按 Endpoints / Services / Entities / Repositories 分層
 3. 在 `ErpDbContext` 中註冊實體
-4. 在 `Program.cs` 中註冊 DI（或用 Scrutor 自動掃描）
+4. 在 `Program.cs` 中註冊 DI（本項目手動註冊，未用 Scrutor 掃描）
+5. 跑 `pwsh -File scripts/check.ps1` 驗證
 
 ### 數據庫遷移
 
@@ -148,15 +156,13 @@ dotnet run --project tests/Accounting.Checks/Accounting.Checks.csproj -c Release
 
 ## GitHub Actions
 
-工作流位於 [.github/workflows/ci.yml](.github/workflows/ci.yml)，推送及 Pull Request 時自動執行，也可在 GitHub 的 **Actions → CI → Run workflow** 手動觸發。
+工作流位於 [.github/workflows/ci.yml](.github/workflows/ci.yml)，在 Pull Request 及手動觸發（**Actions → CI → Run workflow**）時執行，只負責建置與打包，不跑檢查。
 
-- 後端：使用 .NET 10 進行 Release 構建，執行 Identity、Accounting 檢查及 PostgreSQL 16 整合檢查。
-- 前端：使用 Node.js 24、pnpm 10，按鎖文件安裝依賴，執行 TypeScript 檢查及 Vite 生產構建。
-- 檢查階段使用臨時 PostgreSQL，不連接正式資料庫。默認分支檢查通過後，透過 SSH 部署至 Ubuntu 24.04，啟動前端、後端及獨立的正式 PostgreSQL；PR 不部署。
+- 後端：使用 .NET 10 進行 Release 構建，上傳發布產物。
+- 前端：使用 Node.js 24、pnpm（版本見 `package.json` 的 `packageManager`），按鎖文件安裝依賴，執行 Vite 生產構建。
+- 在默認分支手動觸發且建置成功後，透過 SSH 部署至 Ubuntu 24.04，啟動前端、後端及獨立的正式 PostgreSQL；PR 不部署。
 
-首次伺服器初始化命令、GitHub Secrets / Variables 清單及登入方法見 [deploy/README.md](deploy/README.md)。
-
-將變更推送到 GitHub 後，可在 **Actions** 查看執行結果。若要禁止未通過檢查的 PR 合併，請在分支 Ruleset 中將 **Backend Build and Checks** 和 **Frontend Type Check and Build** 設為必要狀態檢查。
+本地驗證以 `scripts/check.ps1` 為準（建置 + Identity / Accounting Checks + 前端型別與建置）。首次伺服器初始化命令、GitHub Secrets / Variables 清單及登入方法見 [deploy/README.md](deploy/README.md)。
 
 ## License
 
