@@ -54,4 +54,6 @@ public sealed class SysDictRepository(ErpDbContext db) : ISysDictRepository
         dict.DeletedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
     }
+
+    public Task SaveAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
 }

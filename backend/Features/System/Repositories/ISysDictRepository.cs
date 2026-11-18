@@ -10,4 +10,5 @@ public interface ISysDictRepository
     Task AddAsync(SysDict dict, CancellationToken ct = default);
     Task UpdateAsync(SysDict dict, CancellationToken ct = default);
     Task DeleteAsync(SysDict dict, CancellationToken ct = default);
+    Task SaveAsync(CancellationToken ct = default);
 }

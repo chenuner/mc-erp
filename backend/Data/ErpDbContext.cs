@@ -24,6 +24,7 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
 
     // System（系統級字典及其他系統配置）
     public DbSet<SysDict> SysDicts => Set<SysDict>();
+    public DbSet<SysDictGroup> SysDictGroups => Set<SysDictGroup>();
 
     // Storage
     public DbSet<FileItem> FileItems => Set<FileItem>();
@@ -145,6 +146,19 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
             e.Property(s => s.TotalAmount).HasPrecision(18, 2);
             e.Property(s => s.Remark).HasMaxLength(255);
             e.HasIndex(s => new { s.WorkerId, s.Year, s.Month }).IsUnique();
+        });
+
+        // System 模塊：字典分組
+        modelBuilder.Entity<SysDictGroup>(e =>
+        {
+            e.ToTable("sys_dict_group");
+            e.HasKey(g => g.Id);
+            e.Property(g => g.Code).HasMaxLength(50).IsRequired();
+            e.Property(g => g.Name).HasMaxLength(100).IsRequired();
+            e.Property(g => g.Sort).HasDefaultValue(0);
+            e.Property(g => g.Remark).HasMaxLength(255);
+            e.HasIndex(g => g.Code).IsUnique().HasFilter("\"IsDeleted\" = false");
+            e.HasQueryFilter(g => !g.IsDeleted);
         });
 
         // System 模塊：系統字典

@@ -111,7 +111,9 @@ builder.Services.AddScoped<FileService>();
 
 // System 模塊
 builder.Services.AddScoped<ISysDictRepository, SysDictRepository>();
+builder.Services.AddScoped<ISysDictGroupRepository, SysDictGroupRepository>();
 builder.Services.AddScoped<SysDictService>();
+builder.Services.AddScoped<SysDictGroupService>();
 
 // 健康檢查
 builder.Services.AddHealthChecks()

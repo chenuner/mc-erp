@@ -4,7 +4,7 @@
 >
 > **專案意志**：本地與生產的行為保持一致，不按 `ASPNETCORE_ENVIRONMENT` 切換功能（API 文檔、模擬資料初始化等）。要新增 `IsDevelopment()` / `IsProduction()` 分支前，必須先向維護者確認。
 >
-> 最後更新：2026-11-17
+> 最後更新：2026-11-18
 
 ---
 
@@ -20,7 +20,7 @@
 | Accounting | 上傳、OCR、人工確認、ZIP 匯出 | ✅ 可用（OCR 需配置才啟用） | `ReceiptService` |
 | Storage | 本地文件上傳 / 下載 / 刪除、MD5 | ✅ 可用 | `FileService` |
 | Storage | 按地盤 / 帳戶的檔案權限（FilePermission） | ❌ 未實現，目前只有 Admin / 非 Admin 粗粒度 | — |
-| System | 系統字典 CRUD | ✅ 可用 | `SysDictService` |
+| System | 系統字典：分組管理 + 字典項 CRUD，字典值自動編號、可調整排序 | ✅ 可用 | `SysDictGroupService` / `SysDictService` |
 | 前端 | 登入、工作台、考勤、會計、文件、字典、用戶頁 | ✅ 可用 | `frontend/src/views` |
 
 ---

@@ -56,7 +56,7 @@
 | **Attendance** | 外部打卡數據拉取、工數統計、薪酬計算（MPF/OT）、月結報表 | AttendanceRecord / MonthlyWorkSummary / Worker |
 | **Accounting** | 收據拍照上傳、OCR 識別、支出按地盤分類、年度提取 | Receipt（分類走 System 的 SysDict） |
 | **Storage** | 雲盤文件管理、地盤照片存儲、按地盤/時間/事件分類、賬戶權限。文件存儲抽象為 `IFileStorage` 接口，MVP 階段用本地存儲實現，跑通後換對象存儲只需換實現 | FileItem（FilePermission / SitePhoto 規劃中） |
-| **System** | 系統字典：支出分類、票據類型、文件類別等可配置項 | SysDict |
+| **System** | 系統字典：分組 + 字典項（支出分類、票據類型、文件類別等可配置項） | SysDictGroup / SysDict |
 
 ### 模組間通信
 
@@ -101,10 +101,10 @@ backend/
 │   │   ├── Services/           # IFileStorage / LocalFileStorage / FileService
 │   │   └── Entities/           # FileItem
 │   └── System/
-│       ├── Endpoints/          # 系統字典 CRUD
-│       ├── Services/           # SysDictService
-│       ├── Entities/           # SysDict
-│       └── Repositories/       # ISysDictRepository + 實現
+│       ├── Endpoints/          # 字典分組 + 字典項 CRUD
+│       ├── Services/           # SysDictGroupService / SysDictService
+│       ├── Entities/           # SysDictGroup / SysDict
+│       └── Repositories/       # ISysDictGroupRepository / ISysDictRepository + 實現
 └── Data/
     └── ErpDbContext.cs         # 單一 DbContext，所有實體在這裡註冊
 

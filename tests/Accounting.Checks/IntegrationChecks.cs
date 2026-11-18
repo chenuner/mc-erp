@@ -88,9 +88,41 @@ internal static class IntegrationChecks
             Check(categories.GetArrayLength() == 7, "new database category seed");
             var materialId = categories.EnumerateArray().Single(dict => dict.GetProperty("value").GetString() == "materials").GetProperty("id").GetGuid();
             var pendingId = categories.EnumerateArray().Single(dict => dict.GetProperty("value").GetString() == "pending").GetProperty("id").GetGuid();
+            var temporaryCategory = await Post("system/dicts", new { groupName = "Accounting", label = "Temporary" });
+            using (var deleteTemporary = await client.DeleteAsync($"system/dicts/{temporaryCategory.GetProperty("id").GetGuid()}"))
+                Check(deleteTemporary.StatusCode == HttpStatusCode.NoContent, "unreferenced Accounting category can be deleted");
             var documents = await Get("system/dicts/group/AccountingDocumentType");
             var documentId = documents[0].GetProperty("id").GetGuid();
             var secondDocumentId = documents[1].GetProperty("id").GetGuid();
+
+            var customGroup = await Post("system/dict-groups", new { name = "Check Group" });
+            var customGroupId = customGroup.GetProperty("id").GetGuid();
+            var customGroupCode = customGroup.GetProperty("code").GetString()!;
+            var dictOne = await Post("system/dicts", new { groupName = customGroupCode, label = "First" });
+            var dictTwo = await Post("system/dicts", new { groupName = customGroupCode, label = "Second" });
+            var dictOneId = dictOne.GetProperty("id").GetGuid();
+            var dictTwoId = dictTwo.GetProperty("id").GetGuid();
+            Check(dictOne.GetProperty("value").GetString() == "1" && dictTwo.GetProperty("value").GetString() == "2", "dict values auto-numbered");
+            using (var reorder = await client.PutAsJsonAsync("system/dicts/reorder", new { groupName = customGroupCode, ids = new[] { dictTwoId, dictOneId } }))
+            {
+                Check(reorder.StatusCode == HttpStatusCode.OK, "reorder accepted");
+                var reordered = await Get($"system/dicts/group/{customGroupCode}");
+                Check(reordered[0].GetProperty("id").GetGuid() == dictTwoId, "reorder persisted");
+            }
+            using (var invalidReorder = await client.PutAsJsonAsync("system/dicts/reorder", new { groupName = customGroupCode, ids = new[] { dictOneId } }))
+                Check(invalidReorder.StatusCode == HttpStatusCode.BadRequest, "incomplete reorder rejected");
+            var groups = await Get("system/dict-groups");
+            Check(groups.EnumerateArray().Any(group => group.GetProperty("code").GetString() == customGroupCode
+                && group.GetProperty("itemCount").GetInt32() == 2), "group item counts");
+            using (var duplicateValue = await client.PostAsJsonAsync("system/dicts", new { groupName = customGroupCode, label = "Duplicate", value = "1" }))
+                Check(duplicateValue.StatusCode == HttpStatusCode.BadRequest, "duplicate dict value rejected");
+            using (var deleteFilledGroup = await client.DeleteAsync($"system/dict-groups/{customGroupId}"))
+                Check(deleteFilledGroup.StatusCode == HttpStatusCode.BadRequest, "filled group cannot be deleted");
+            using (var lockSystemValue = await client.PutAsJsonAsync($"system/dicts/{pendingId}", new { value = "changed" }))
+                Check(lockSystemValue.StatusCode == HttpStatusCode.BadRequest, "system group dict value locked");
+            var systemGroup = groups.EnumerateArray().Single(group => group.GetProperty("code").GetString() == "Accounting");
+            using (var deleteSystemGroup = await client.DeleteAsync($"system/dict-groups/{systemGroup.GetProperty("id").GetGuid()}"))
+                Check(deleteSystemGroup.StatusCode == HttpStatusCode.BadRequest, "system group cannot be deleted");
             var siteA = (await Post("attendance/sites", new { name = "Check A", address = "A" })).GetProperty("id").GetGuid();
             var siteB = (await Post("attendance/sites", new { name = "Check B", address = "B" })).GetProperty("id").GetGuid();
             var categoryA = (await Post("system/dicts", new { groupName = "AccountingSiteCategory", label = "Export A", value = "a", enabled = true })).GetProperty("id").GetGuid();
@@ -186,9 +218,23 @@ internal static class IntegrationChecks
             filtered = await Get("storage/files");
             Check(filtered.GetArrayLength() == 0, "worker list hides Accounting images");
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using (var disablePending = await client.PutAsJsonAsync($"system/dicts/{pendingId}", new { enabled = false }))
+                Check(disablePending.StatusCode == HttpStatusCode.BadRequest, "pending category cannot be disabled");
+            using (var deletePending = await client.DeleteAsync($"system/dicts/{pendingId}"))
+                Check(deletePending.StatusCode == HttpStatusCode.Conflict, "pending category cannot be deleted");
+            using (var disableDocument = await client.PutAsJsonAsync($"system/dicts/{documentId}", new { enabled = false }))
+                disableDocument.EnsureSuccessStatusCode();
+            using (var disableLastDocument = await client.PutAsJsonAsync($"system/dicts/{secondDocumentId}", new { enabled = false }))
+                Check(disableLastDocument.StatusCode == HttpStatusCode.BadRequest, "last document type cannot be disabled");
+            using (var enableDocument = await client.PutAsJsonAsync($"system/dicts/{documentId}", new { enabled = true }))
+                enableDocument.EnsureSuccessStatusCode();
             using (var disabled = await client.PutAsJsonAsync($"system/dicts/{materialId}", new { enabled = false })) disabled.EnsureSuccessStatusCode();
             filtered = await Get("accounting/receipts");
             Check(filtered.GetProperty("total").GetInt32() == 2, "disabled category history retained");
+            using (var deleteDictOne = await client.DeleteAsync($"system/dicts/{dictOneId}")) deleteDictOne.EnsureSuccessStatusCode();
+            using (var deleteDictTwo = await client.DeleteAsync($"system/dicts/{dictTwoId}")) deleteDictTwo.EnsureSuccessStatusCode();
+            using (var deleteEmptyGroup = await client.DeleteAsync($"system/dict-groups/{customGroupId}"))
+                Check(deleteEmptyGroup.StatusCode == HttpStatusCode.NoContent, "empty group can be deleted");
             File.Delete(Directory.GetFiles(temporaryRoot).First());
             using (var missingImage = await client.GetAsync("accounting/receipts/export"))
                 Check(missingImage.StatusCode == HttpStatusCode.InternalServerError, "missing original fails entire archive");
