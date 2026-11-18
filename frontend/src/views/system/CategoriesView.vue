@@ -263,7 +263,12 @@ async function toggleEnabled(row: SysDictDto, enabled: boolean) {
 }
 
 function handleEnabledChange(row: SysDictDto, value: string | number | boolean) {
-  void toggleEnabled(row, Boolean(value))
+  const enabled = Boolean(value)
+  if (isRequiredDict(row) && !enabled) {
+    ElMessage.warning('「待分類」是票據上傳流程必需項，不能停用')
+    return
+  }
+  void toggleEnabled(row, enabled)
 }
 
 function canMove(id: string, delta: number) {
@@ -428,8 +433,8 @@ onMounted(async () => {
         </div>
 
         <el-table v-loading="itemsLoading" :data="visibleItems" row-key="id" stripe>
-          <el-table-column type="index" label="#" width="56" align="center" />
-          <el-table-column label="排序" width="92" align="center">
+          <el-table-column type="index" label="#" width="48" align="center" />
+          <el-table-column label="排序" width="80" align="center">
             <template #default="{ row }">
               <div class="sort-buttons">
                 <el-button link type="primary" :disabled="!canMove(row.id, -1)" aria-label="上移" title="上移" @click="moveItem(row, -1)">
@@ -441,7 +446,7 @@ onMounted(async () => {
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="標籤" min-width="220">
+          <el-table-column label="標籤" min-width="200">
             <template #default="{ row }">
               <div class="dict-label">
                 {{ row.label }}
@@ -449,27 +454,29 @@ onMounted(async () => {
               </div>
               <div class="dict-code">
                 識別碼 {{ row.value }}
-                <span v-if="selectedGroup.isSystem" class="dict-lock">· 系統鎖定</span>
+                <span v-if="selectedGroup.isSystem" class="dict-lock">· 識別碼不可改</span>
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="備註" min-width="180">
+          <el-table-column label="備註" min-width="120">
             <template #default="{ row }">{{ row.remark || '—' }}</template>
           </el-table-column>
-          <el-table-column label="狀態" width="110" align="center">
+          <el-table-column label="狀態" width="100" align="center">
             <template #default="{ row }">
               <el-switch
                 :model-value="row.enabled"
-                :disabled="isRequiredDict(row) && row.enabled"
                 :loading="togglingIds.includes(row.id)"
                 @change="handleEnabledChange(row, $event)"
               />
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="140" align="center">
+          <el-table-column label="操作" width="140" align="center" fixed="right" class-name="actions-cell">
             <template #default="{ row }">
               <el-button link type="primary" @click="openItemEdit(row)">編輯</el-button>
-              <el-button link type="danger" :disabled="isRequiredDict(row)" @click="removeItem(row)">刪除</el-button>
+              <el-tooltip v-if="isRequiredDict(row)" content="票據上傳流程必需，不能刪除" placement="top">
+                <span class="locked-action"><AppIcon name="lock" :size="12" />不可刪除</span>
+              </el-tooltip>
+              <el-button v-else link type="danger" @click="removeItem(row)">刪除</el-button>
             </template>
           </el-table-column>
           <template #empty>
@@ -792,6 +799,20 @@ onMounted(async () => {
   color: var(--mc-primary);
 }
 
+.locked-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--mc-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: not-allowed;
+}
+
+:deep(.actions-cell .cell) {
+  white-space: nowrap;
+}
+
 .empty-panel {
   align-items: center;
   justify-content: center;
@@ -810,7 +831,7 @@ onMounted(async () => {
   font-size: 12px;
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 1280px) {
   .dict-shell {
     grid-template-columns: 1fr;
   }
