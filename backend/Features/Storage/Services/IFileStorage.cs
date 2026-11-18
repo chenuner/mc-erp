@@ -20,6 +20,9 @@ public interface IFileStorage
 /// </summary>
 public sealed class StorageOptions
 {
-    /// <summary>存儲根目錄（相對於應用工作目錄，可用絕對路徑覆蓋）</summary>
+    /// <summary>上傳文件保存目錄（相對進程工作目錄；本地 = backend\storage-files，生產 = /app/storage-files）</summary>
     public string RootPath { get; set; } = "storage-files";
+
+    /// <summary>臨時緩衝目錄（上傳中的大文件、打包中的 ZIP）；不配置則用系統臨時目錄（容器是 /tmp）</summary>
+    public string? TempPath { get; set; }
 }

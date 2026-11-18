@@ -25,6 +25,25 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// 臨時目錄：上傳緩衝（超過 64KB 落盤）和票據打包都走 Path.GetTempPath()。
+// 本地 Windows 的 %TEMP% 可能寫不進去，用 Storage:TempPath 覆蓋；未配置則用系統默認（生產容器是 /tmp）
+var storageSettings = builder.Configuration.GetSection("Storage").Get<StorageOptions>() ?? new StorageOptions();
+if (!string.IsNullOrWhiteSpace(storageSettings.TempPath))
+{
+    var tempPath = storageSettings.TempPath;
+    try
+    {
+        Directory.CreateDirectory(tempPath);
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+    {
+        // 啟動時就報清楚，免得等到上傳才出現莫名其妙的 500
+        throw new InvalidOperationException($"臨時目錄不可用：{tempPath}（檢查 Storage:TempPath）", ex);
+    }
+    Environment.SetEnvironmentVariable("TMP", tempPath);
+    Environment.SetEnvironmentVariable("TEMP", tempPath);
+}
+
 // 日誌
 builder.Host.UseSerilog((ctx, cfg) => cfg
     .ReadFrom.Configuration(ctx.Configuration)
