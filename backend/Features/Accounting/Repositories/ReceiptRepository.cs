@@ -12,12 +12,15 @@ public sealed class ReceiptRepository(ErpDbContext db, IHttpContextAccessor cont
     private CancellationToken Token => context.HttpContext?.RequestAborted ?? default;
 
     private IQueryable<Receipt> Query(ReceiptFilter filter) => db.Receipts
-        .Include(receipt => receipt.FileItem).ThenInclude(file => file.TypeDict)
+        .Include(receipt => receipt.FileItem)
+        .Include(receipt => receipt.TypeDict)
         .Include(receipt => receipt.Site).Include(receipt => receipt.DocumentTypeDict).Include(receipt => receipt.SiteCategoryDict)
-        .Where(receipt => !receipt.FileItem.IsDeleted && receipt.FileItem.TypeDict != null && receipt.FileItem.TypeDict.GroupName == "Accounting")
+        // 沒有原圖的手動票據也要列出；原圖被軟刪除的票據維持不列出
+        .Where(receipt => receipt.FileItemId == null
+            || (receipt.FileItem != null && receipt.FileItem.TypeDict != null && receipt.FileItem.TypeDict.GroupName == "Accounting"))
         .Where(receipt => filter.SiteId == null || receipt.SiteId == filter.SiteId)
         .Where(receipt => filter.DocumentTypeDictId == null || receipt.DocumentTypeDictId == filter.DocumentTypeDictId)
-        .Where(receipt => filter.Type == null || receipt.FileItem.Type == filter.Type)
+        .Where(receipt => filter.Type == null || receipt.Type == filter.Type)
         .Where(receipt => filter.SiteCategoryDictId == null || receipt.SiteCategoryDictId == filter.SiteCategoryDictId)
         .Where(receipt => filter.Start == null || receipt.ReceiptDate >= filter.Start)
         .Where(receipt => filter.End == null || receipt.ReceiptDate <= filter.End)
@@ -33,6 +36,7 @@ public sealed class ReceiptRepository(ErpDbContext db, IHttpContextAccessor cont
     }
 
     public Task<List<Receipt>> ExportAsync(ReceiptFilter filter) => Query(filter).AsNoTracking()
+        .Where(receipt => receipt.FileItemId != null)
         .OrderBy(receipt => receipt.ReceiptDate).ThenBy(receipt => receipt.Id).Take(5001).ToListAsync(Token);
 
     public Task<Receipt?> FindAsync(Guid id) => Query(new()).FirstOrDefaultAsync(receipt => receipt.Id == id, Token);
@@ -42,6 +46,12 @@ public sealed class ReceiptRepository(ErpDbContext db, IHttpContextAccessor cont
         db.Receipts.Add(receipt);
         try { await db.SaveChangesAsync(Token); }
         catch { db.Entry(receipt).State = EntityState.Detached; throw; }
+    }
+
+    public async Task DeleteAsync(Receipt receipt)
+    {
+        db.Receipts.Remove(receipt);
+        await db.SaveChangesAsync(Token);
     }
 
     public async Task InTransactionAsync(Func<Task> operation)

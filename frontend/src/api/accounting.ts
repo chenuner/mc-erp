@@ -4,16 +4,16 @@ import type { PagedResult } from './system'
 export interface ReceiptDto {
   id: string
   version: string
-  fileItemId: string
-  fileName: string
+  fileItemId: string | null
+  fileName: string | null
   md5: string | null
-  sizeBytes: number
+  sizeBytes: number | null
   siteId: string
   siteName: string
   documentTypeDictId: string
   documentTypeLabel: string
-  type: string | null
-  typeLabel: string | null
+  type: string
+  typeLabel: string
   siteCategoryDictId: string | null
   siteCategoryLabel: string | null
   receiptDate: string | null
@@ -55,10 +55,16 @@ export async function getReceipt(id: string): Promise<ReceiptDto> {
   return await request.get(`/accounting/receipts/${id}`) as ReceiptDto
 }
 
-export async function uploadReceipt(siteId: string, documentTypeDictId: string, file: File): Promise<ReceiptDto> {
+/** 建立草稿票據；原圖可稍後再補，不影響先填表。 */
+export async function createReceipt(siteId: string, documentTypeDictId: string): Promise<ReceiptDto> {
+  return await request.post('/accounting/receipts', { siteId, documentTypeDictId }) as ReceiptDto
+}
+
+/** 補上或更換票據原圖（JPEG / PNG，最多 4 MB）。 */
+export async function attachReceiptImage(id: string, file: File): Promise<ReceiptDto> {
   const form = new FormData()
   form.append('file', file)
-  return await request.post('/accounting/receipts', form, { params: { siteId, documentTypeDictId }, timeout: 60000 }) as ReceiptDto
+  return await request.post(`/accounting/receipts/${id}/image`, form, { timeout: 60000 }) as ReceiptDto
 }
 
 export async function recognizeReceipt(id: string, documentTypeDictId?: string): Promise<ReceiptDto> {
@@ -71,6 +77,11 @@ export async function updateReceipt(id: string, payload: UpdateReceipt): Promise
 
 export async function confirmReceipt(id: string, version: string): Promise<ReceiptDto> {
   return await request.post(`/accounting/receipts/${id}/confirm`, { version }) as ReceiptDto
+}
+
+/** 刪除票據，連同原圖一併清理。 */
+export async function deleteReceipt(id: string): Promise<void> {
+  await request.delete(`/accounting/receipts/${id}`)
 }
 
 export async function receiptImage(id: string): Promise<Blob> {

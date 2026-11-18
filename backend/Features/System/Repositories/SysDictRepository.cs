@@ -47,7 +47,8 @@ public sealed class SysDictRepository(ErpDbContext db) : ISysDictRepository
         if (dict.GroupName is "Accounting" or "AccountingDocumentType" or "AccountingSiteCategory")
         {
             if (await db.FileItems.IgnoreQueryFilters().AnyAsync(file => file.Type == dict.Id, ct)
-                || await db.Receipts.IgnoreQueryFilters().AnyAsync(receipt => receipt.DocumentTypeDictId == dict.Id || receipt.SiteCategoryDictId == dict.Id, ct))
+                || await db.Receipts.IgnoreQueryFilters().AnyAsync(receipt => receipt.Type == dict.Id
+                    || receipt.DocumentTypeDictId == dict.Id || receipt.SiteCategoryDictId == dict.Id, ct))
                 throw new InvalidOperationException("分類已被會計票據引用，請停用而不要刪除");
         }
         dict.IsDeleted = true;

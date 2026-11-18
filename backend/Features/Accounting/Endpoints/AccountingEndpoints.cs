@@ -26,11 +26,13 @@ public static class AccountingEndpoints
             return TypedResults.Ok(new PagedResult<ReceiptResponse>(
                 result.Items.Select(ReceiptResponse.From).ToList(), result.Total, currentPage, size));
         });
-        group.MapPost("/receipts", async (Guid siteId, Guid documentTypeDictId, IFormFile file, ReceiptService service) =>
+        group.MapPost("/receipts", async (CreateReceiptRequest request, ReceiptService service) =>
         {
-            var receipt = await service.UploadAsync(siteId, documentTypeDictId, file);
+            var receipt = await service.CreateAsync(request.SiteId, request.DocumentTypeDictId);
             return TypedResults.Created($"/api/accounting/receipts/{receipt.Id}", ReceiptResponse.From(receipt));
-        }).DisableAntiforgery();
+        });
+        group.MapPost("/receipts/{id:guid}/image", async (Guid id, IFormFile file, ReceiptService service) =>
+            TypedResults.Ok(ReceiptResponse.From(await service.AttachImageAsync(id, file)))).DisableAntiforgery();
         group.MapGet("/receipts/export", async (Guid? siteId, Guid? documentTypeDictId, Guid? type,
             Guid? siteCategoryDictId, DateOnly? start, DateOnly? end, bool? isConfirmed, ReceiptService service) =>
         {
@@ -42,12 +44,18 @@ public static class AccountingEndpoints
             TypedResults.Ok(ReceiptResponse.From(await service.UpdateAsync(id, request))));
         group.MapPost("/receipts/{id:guid}/recognize", async (Guid id, Guid? documentTypeDictId, ReceiptService service) =>
             TypedResults.Ok(ReceiptResponse.From(await service.RecognizeAsync(id, documentTypeDictId))));
+        group.MapDelete("/receipts/{id:guid}", async (Guid id, ReceiptService service) =>
+        {
+            await service.DeleteAsync(id);
+            return TypedResults.NoContent();
+        });
         group.MapPost("/receipts/{id:guid}/confirm", async (Guid id, ConfirmReceiptRequest request, ReceiptService service) =>
             TypedResults.Ok(ReceiptResponse.From(await service.ConfirmAsync(id, request.Version))));
         group.MapGet("/receipts/{id:guid}/image", async (Guid id, ReceiptService service, FileService files) =>
         {
             var receipt = await service.FindAsync(id);
-            var download = await files.下载Async(receipt.FileItemId) ?? throw new KeyNotFoundException("原圖不存在");
+            if (receipt.FileItemId is not { } fileId) throw new KeyNotFoundException("原圖不存在");
+            var download = await files.下载Async(fileId) ?? throw new KeyNotFoundException("原圖不存在");
             return TypedResults.File(download.Content, download.File.ContentType, download.File.OriginalName);
         });
     }
@@ -60,19 +68,21 @@ public static class AccountingEndpoints
     }
 }
 
+public sealed record CreateReceiptRequest(Guid SiteId, Guid DocumentTypeDictId);
+
 public sealed record ConfirmReceiptRequest(Guid Version);
 
-public sealed record ReceiptResponse(Guid Id, Guid Version, Guid FileItemId, string FileName, string? Md5,
-    long SizeBytes, Guid SiteId, string SiteName, Guid DocumentTypeDictId, string DocumentTypeLabel,
-    Guid? Type, string? TypeLabel, Guid? SiteCategoryDictId, string? SiteCategoryLabel,
+public sealed record ReceiptResponse(Guid Id, Guid Version, Guid? FileItemId, string? FileName, string? Md5,
+    long? SizeBytes, Guid SiteId, string SiteName, Guid DocumentTypeDictId, string DocumentTypeLabel,
+    Guid Type, string TypeLabel, Guid? SiteCategoryDictId, string? SiteCategoryLabel,
     DateOnly? ReceiptDate, decimal? Amount, string? CurrencyCode, string? MerchantName,
     string? InvoiceNumber, string? Remark, string OcrStatus, string? OcrError,
     string? OcrText, JsonElement? OcrResult, bool ManuallyEdited, bool IsConfirmed)
 {
     public static ReceiptResponse From(Receipt receipt) => new(receipt.Id, receipt.Version,
-        receipt.FileItemId, receipt.FileItem.OriginalName, receipt.FileItem.Md5, receipt.FileItem.SizeBytes,
+        receipt.FileItemId, receipt.FileItem?.OriginalName, receipt.FileItem?.Md5, receipt.FileItem?.SizeBytes,
         receipt.SiteId, receipt.Site.Name, receipt.DocumentTypeDictId, receipt.DocumentTypeDict.Label,
-        receipt.FileItem.Type, receipt.FileItem.TypeDict?.Label, receipt.SiteCategoryDictId, receipt.SiteCategoryDict?.Label,
+        receipt.Type, receipt.TypeDict.Label, receipt.SiteCategoryDictId, receipt.SiteCategoryDict?.Label,
         receipt.ReceiptDate, receipt.Amount, receipt.CurrencyCode, receipt.MerchantName,
         receipt.InvoiceNumber, receipt.Remark, receipt.OcrStatus, receipt.OcrError, receipt.OcrText,
         receipt.OcrResultJson == null ? null : JsonSerializer.Deserialize<JsonElement>(receipt.OcrResultJson), receipt.ManuallyEdited, receipt.IsConfirmed);

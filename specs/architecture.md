@@ -185,13 +185,14 @@ User ─┬─ UserRole ── Role ── RolePermission ── Permission
 
 ### OCR 識別（會計收據）
 
-- 原圖和票據草稿先保存，使用 Azure Document Intelligence `prebuilt-receipt` / `prebuilt-invoice` 識別，結果須人工確認。未識別的日期、金額及幣種保持空值。
+- 票據可直接手動錄入（不必先有原圖），原圖可稍後補上或更換；有原圖後才可識別。使用 Azure Document Intelligence `prebuilt-receipt` / `prebuilt-invoice` 識別，結果須人工確認。未識別的日期、金額及幣種保持空值。
 - `IOcrService` 位於 Common/Infrastructure/Ocr，使用官方 C# SDK，憑據只在後端配置；收據中文識別須實測，不能保證準確率。
 - `Receipt.SiteId` 引用考勤地盤，表示實際支出歸屬；`SiteCategoryDictId` 引用 `AccountingSiteCategory` 字典，僅表示圖片提取分類，兩者獨立。
-- `DocumentTypeDictId` 引用 `AccountingDocumentType`（receipt / invoice）；圖片 `FileItem.Type` 引用 `Accounting` 支出分類，分類不在票據表重複保存。
+- `DocumentTypeDictId` 引用 `AccountingDocumentType`（receipt / invoice）。支出分類由 `Receipt.Type` 持有（`Accounting` 字典），沒有原圖也可保存；有原圖時同步寫入 `FileItem.Type`，供文件模組按分類展示。
 - 金額 decimal(18,2)，票據日期 DateOnly；發票金額取 InvoiceTotal，不取可能含歷史欠款的 AmountDue，也不自動視為已付款。
-- 僅 Admin 操作；會計圖片不能經通用 Storage 接口繞過權限或刪除。識別失敗保留原圖並可重試，識別不得覆寫已人工修改資料。
-- 按票據日期（含起止日）、票據類型、支出分類、導出地盤分類及可選實際地盤提取全部匹配原圖為 ZIP，不限當前頁，不輸出 CSV。MD5 僅作核對，不是文件地址或唯一鍵。
+- 保存與確認共用同一組必填欄位（前後端一致）：實際地盤、票據類型、支出分類（不能是 pending）、導出地盤分類、票據日期、正數金額、三位英文字母幣種。
+- 僅 Admin 操作；會計圖片不能經通用 Storage 接口繞過權限或刪除。票據可經會計接口刪除（原圖一併清理），刪除不可復原。識別失敗保留原圖並可重試，識別不得覆寫已人工修改資料。
+- 按票據日期（含起止日）、票據類型、支出分類、導出地盤分類及可選實際地盤提取全部匹配原圖為 ZIP，不限當前頁，不輸出 CSV；沒有原圖的票據不進 ZIP。MD5 僅作核對，不是文件地址或唯一鍵。
 - ZIP 使用臨時文件，預設上限 5000 張 / 250 MB 原圖，完成或失敗後清理；第一版單圖上限 4 MB，與 Azure F0 相容。
 
 ### 文件存儲

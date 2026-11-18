@@ -51,7 +51,7 @@ namespace MC.Erp.Migrations
                     b.Property<Guid>("DocumentTypeDictId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("FileItemId")
+                    b.Property<Guid?>("FileItemId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("InvoiceNumber")
@@ -102,6 +102,9 @@ namespace MC.Erp.Migrations
                     b.Property<Guid>("SiteId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid>("Type")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -117,6 +120,8 @@ namespace MC.Erp.Migrations
                         .IsUnique();
 
                     b.HasIndex("ReceiptDate");
+
+                    b.HasIndex("Type");
 
                     b.HasIndex("SiteCategoryDictId", "ReceiptDate");
 
@@ -617,8 +622,7 @@ namespace MC.Erp.Migrations
                     b.HasOne("MC.Erp.Features.Storage.Entities.FileItem", "FileItem")
                         .WithOne()
                         .HasForeignKey("MC.Erp.Features.Accounting.Entities.Receipt", "FileItemId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("MC.Erp.Features.System.Entities.SysDict", "SiteCategoryDict")
                         .WithMany()
@@ -631,6 +635,12 @@ namespace MC.Erp.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MC.Erp.Features.System.Entities.SysDict", "TypeDict")
+                        .WithMany()
+                        .HasForeignKey("Type")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("DocumentTypeDict");
 
                     b.Navigation("FileItem");
@@ -638,6 +648,8 @@ namespace MC.Erp.Migrations
                     b.Navigation("Site");
 
                     b.Navigation("SiteCategoryDict");
+
+                    b.Navigation("TypeDict");
                 });
 
             modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.AttendanceRecord", b =>

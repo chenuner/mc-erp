@@ -7,12 +7,20 @@ namespace MC.Erp.Features.Accounting.Entities;
 
 public sealed class Receipt : AuditableEntity
 {
-    public Guid FileItemId { get; set; }
-    public FileItem FileItem { get; set; } = null!;
+    /// <summary>票據原圖；手動錄入的票據可以先沒有原圖，之後再補上傳。</summary>
+    public Guid? FileItemId { get; set; }
+    public FileItem? FileItem { get; set; }
     public Guid SiteId { get; set; }
     public Site Site { get; set; } = null!;
     public Guid DocumentTypeDictId { get; set; }
     public SysDict DocumentTypeDict { get; set; } = null!;
+
+    /// <summary>
+    /// 支出分類（Accounting 字典）。分類由票據持有，沒有原圖也可保存；
+    /// 有原圖時同步寫入 FileItem.Type，供文件模組按分類展示。
+    /// </summary>
+    public Guid Type { get; set; }
+    public SysDict TypeDict { get; set; } = null!;
     public Guid? SiteCategoryDictId { get; set; }
     public SysDict? SiteCategoryDict { get; set; }
     public DateOnly? ReceiptDate { get; set; }
