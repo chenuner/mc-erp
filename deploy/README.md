@@ -4,6 +4,8 @@
 
 只有两个环境：根目录 `docker-compose.yml` 启动本地开发数据库，`docker-compose.prod.yml` 启动生产前后端及数据库。生产 Dockerfile 位于 `backend/` 和 `frontend/`，只打包 GitHub 已构建的产物，不在服务器编译源码。
 
+本服务器已有官網佔用 80/443，因此宿主機 nginx 是唯一入口，ERP 的 web 容器只綁 `127.0.0.1:8080`。根目錄 `nginx.conf` 是伺服器 `/etc/nginx/nginx.conf` 的參考版本，不隨 CI 上傳。
+
 ## 1. 首次初始化服务器
 
 先将本次部署代码提交、推送到 GitHub。尚未配置部署参数时，首次 Deploy Production 失败是预期行为；配置完成后重新运行整个工作流。
@@ -38,7 +40,42 @@ sudo bash deploy/bootstrap.sh
 		└── dist/
 ```
 
-云服务器安全组放行 TCP 22、80。数据库和后端没有宿主机端口映射，不要放行 5432 或 8080。若已启用 UFW，先确保实际 SSH 端口已放行，再执行 `sudo ufw allow 80/tcp`。这里假定 SSH 端口为 22。
+云服务器安全组放行 TCP 22、80、443。数据库和 web 容器没有对公网映射，不要放行 5432 或 8080。若已启用 UFW，先确保实际 SSH 端口已放行，再执行 `sudo ufw allow 80,443/tcp`。这里假定 SSH 端口为 22。
+
+### 1.1 與現有官網共存（先用 IP 驗收）
+
+官網 `msucce.com` / `www.msucce.com` 繼續由宿主機 nginx 從 `/var/www/dist` 提供。ERP 先用 `http://伺服器公網IP` 打開，nginx 把「沒有匹配到官網域名」的請求轉發到 `127.0.0.1:8080`，不需要域名，也不需要新證書。
+
+1. 把根目錄 `nginx.conf` 套到 `/etc/nginx/nginx.conf`，先檢查再 reload：
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+這個配置只新增一個 `listen 80 default_server` 的 ERP 站點，官網的 80/443 兩塊保持原樣。先套用再做部署也可以；容器未啟動時訪問 IP 只會得到 502，官網不受影響。
+
+若 `nginx -t` 報 `duplicate default server`，表示 `/etc/nginx/sites-enabled/` 或 `conf.d/` 裡已有別的默認站點（Ubuntu 自帶的 `default` 就是），移走那個文件再檢查。
+
+2. 雲安全組放行 80/443（8080 不對外，不要放行）。確認宿主機 8080 沒被佔用：
+
+```bash
+sudo ss -ltnp | grep ':8080' || echo '8080 free'
+```
+
+3. 部署成功後打開 `http://伺服器公網IP`，就是 ERP 登錄頁。
+
+> 臨時用 IP + HTTP 只適合連通驗收。正式錄入員工、薪酬、票據前仍應切到域名 + HTTPS：加 `erp.msucce.com` 的 A 記錄、用 acme.sh 簽證書，再在 `nginx.conf` 給 ERP 加一個 443 server 塊。現有證書只涵蓋 `msucce.com` + `www.msucce.com`，不含子域，屆時要單獨簽：
+
+```bash
+sudo /root/.acme.sh/acme.sh --issue -d erp.msucce.com --webroot /var/www/acme-challenge
+sudo install -d /etc/nginx/ssl/erp.msucce.com
+sudo /root/.acme.sh/acme.sh --install-cert -d erp.msucce.com \
+  --key-file       /etc/nginx/ssl/erp.msucce.com/erp.msucce.com.key \
+  --fullchain-file /etc/nginx/ssl/erp.msucce.com/fullchain.cer \
+  --reloadcmd      "systemctl reload nginx"
+```
+
+`acme.sh` 路徑按實際安裝位置調整（`sudo find / -name acme.sh -type f`）。續期由 acme.sh 每日 cron 處理。
 
 ## 2. GitHub Repository Secrets
 
@@ -74,7 +111,7 @@ printf '%s ' '你的服务器公网IP'; sudo cut -d ' ' -f 1,2 /etc/ssh/ssh_host
 
 GitHub → Actions → CI → Run workflow，选择仓库默认分支。需要重跑时重新运行整个工作流（推送提交不会自动触发 CI），以便重新生成构建产物。PR 不会部署。
 
-等待 Backend Build and Package、Frontend Build and Package、Deploy Production 全部通过，再打开 `http://服务器公网IP`。
+等待 Backend Build and Package、Frontend Build and Package、Deploy Production 全部通过，再打开 `http://服务器公网IP`（前提是已套用 1.1 的 `nginx.conf`）。
 
 用户名为 `admin`，首次密码在服务器查看：
 
@@ -82,10 +119,10 @@ GitHub → Actions → CI → Run workflow，选择仓库默认分支。需要�
 sudo grep '^INITIAL_ADMIN_PASSWORD=' /opt/mc-erp/.env
 ```
 
-此配置的 HTTP 入口只适合首次连通验收。正式录入员工、薪酬、票据等真实数据前，必须配置域名及 HTTPS，避免公网明文传输密码和数据。尚未配置 HTTPS 时，可用 SSH 隧道从本机访问：
+8080 不对公网开放。需要绕过 nginx 直接排查容器时，用 SSH 转发：
 
 ```bash
-ssh -L 8080:127.0.0.1:80 你的管理用户@服务器公网IP
+ssh -L 8080:127.0.0.1:8080 你的管理用户@服务器公网IP
 ```
 
 保持连接后打开 `http://localhost:8080`。使用已有管理账户，不要用禁止端口转发的 Actions 专用密钥。

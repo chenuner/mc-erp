@@ -36,7 +36,6 @@ if [[ ! -f /opt/mc-erp/.env ]]; then
     printf 'POSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 32)"
     printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 64)"
     printf 'INITIAL_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 24)"
-    printf 'HTTP_PORT=80\n'
   } > /opt/mc-erp/.env
   chown deploy:deploy /opt/mc-erp/.env
 fi
@@ -45,4 +44,4 @@ rmdir /opt/mc-erp/shared /opt/mc-erp/incoming /opt/mc-erp/releases 2>/dev/null |
 echo 'Ready. Deploy user: deploy; application directory: /opt/mc-erp'
 echo 'SSH private key: /home/deploy/.ssh/github_actions (GitHub Secret only)'
 echo 'Runtime secrets: /opt/mc-erp/.env (keep on server)'
-echo 'Allow inbound SSH and HTTP in your cloud firewall before deployment.'
+echo 'Allow inbound SSH, HTTP and HTTPS in your cloud firewall before deployment.'
