@@ -1,8 +1,8 @@
 # Ubuntu 24.04 部署
 
-在 GitHub Actions 手动触发、默认分支构建成功后，GitHub Actions 通过 SSH 上传产物，在服务器使用 Docker Compose 启动 PostgreSQL 16、.NET 10 后端及 Nginx 前端。服务器不需要安装 .NET、Node.js 或 pnpm，也不需要仓库访问令牌。
+在 GitHub Actions 手动触发、默认分支构建成功后，GitHub runner 先构建前后端镜像，`docker save` 成压缩包，再通过 SSH 上传；服务器只 `docker load` 镜像并用 Docker Compose 启动 PostgreSQL 16、.NET 10 后端及 Nginx 前端。服务器不需要安装 .NET、Node.js 或 pnpm，也不需要仓库访问令牌，更不会在本机 build 镜像。
 
-只有两个环境：根目录 `docker-compose.yml` 启动本地开发数据库，`docker-compose.prod.yml` 启动生产前后端及数据库。生产 Dockerfile 位于 `backend/` 和 `frontend/`，只打包 GitHub 已构建的产物，不在服务器编译源码。
+只有两个环境：根目录 `docker-compose.yml` 启动本地开发数据库，`docker-compose.prod.yml` 启动生产前后端及数据库。生产 Dockerfile 位于 `backend/` 和 `frontend/`，由 GitHub runner 用来打包 CI 已构建的产物；服务器只接收成品镜像。
 
 本服务器已有官網佔用 80/443，因此宿主機 nginx 是唯一入口，ERP 的 web 容器只綁 `127.0.0.1:8080`。根目錄 `nginx.conf` 是伺服器 `/etc/nginx/nginx.conf` 的參考版本，不隨 CI 上傳。
 
@@ -20,24 +20,19 @@ cd mc-erp
 sudo bash deploy/bootstrap.sh
 ```
 
-脚本只安装 Docker 及 Compose，使用 Ubuntu 已有的 SSH 和 OpenSSL；创建 `deploy` 用户、部署专用 SSH 密钥和 `/opt/mc-erp/.env`。重复运行不会重置密码。Docker 用户组具有等同 root 的权限，应严格保护部署密钥和 GitHub 默认分支。
+脚本只安装 Docker 及 Compose，使用 Ubuntu 已有的 SSH 和 OpenSSL；创建 `deploy` 用户、部署专用 SSH 密钥和 `/opt/mc-erp/.env`，并补 2G swap（`docker load` / 重启容器时避免小内存机器卡在内核态）。重复运行不会重置密码。Docker 用户组具有等同 root 的权限，应严格保护部署密钥和 GitHub 默认分支。
 
-已执行旧版 bootstrap、但尚未部署的服务器，在源码目录执行 `git pull` 后重新运行 `sudo bash deploy/bootstrap.sh`。脚本会将旧的 `shared/.env` 移到 `/opt/mc-erp/.env`，保留所有密码和 SSH 密钥，并移除旧版空目录。已配置的 GitHub Secrets 和 Variables 不需要修改。新增的 docker 重启 sudoers 规则和每日清理 timer 也由这次重跑安装，建议所有服务器都重跑一次。
+已执行旧版 bootstrap、但尚未部署的服务器，在源码目录执行 `git pull` 后重新运行 `sudo bash deploy/bootstrap.sh`。脚本会将旧的 `shared/.env` 移到 `/opt/mc-erp/.env`，保留所有密码和 SSH 密钥，并移除旧版空目录。已配置的 GitHub Secrets 和 Variables 不需要修改。新增的 swap、docker 重启 sudoers 规则和每日清理 timer 也由这次重跑安装，建议所有服务器都重跑一次。
 
 服务器固定目录为：
 
 ```text
 /opt/mc-erp/
 ├── .env                       # 服务器运行密钥
-└── app/                       # CI 上传的生产产物
-	├── docker-compose.prod.yml
-	├── backend/
-	│   ├── Dockerfile
-	│   └── publish/
-	└── frontend/
-		├── Dockerfile
-		├── nginx.conf
-		└── dist/
+├── app/                       # 只放 compose 文件，镜像里已有产物
+│   └── docker-compose.prod.yml
+├── release.tar.gz             # 临时：每次部署上传，解包后删除
+└── mc-erp-images.tar.gz       # 临时：镜像压缩包，load 后立即删除
 ```
 
 云服务器安全组放行 TCP 22、80、443。数据库和 web 容器没有对公网映射，不要放行 5432 或 8080。若已启用 UFW，先确保实际 SSH 端口已放行，再执行 `sudo ufw allow 80,443/tcp`。这里假定 SSH 端口为 22。
@@ -115,9 +110,9 @@ printf '%s ' '你的服务器公网IP'; sudo cut -d ' ' -f 1,2 /etc/ssh/ssh_host
 > - 分支下拉选 `master`。选 `dev` 等其他分支时 `Deploy Production` 显示灰色 `Skipped`，只建置不部署。
 > - 想改成推送即部署：在 `.github/workflows/ci.yml` 的 `on:` 下加 `push:` / `branches: [master]`，代价是每次推 master 都直接改生产。
 
-GitHub → Actions → CI → Run workflow，选择 `master`。需要重跑时重新运行整个工作流，以便重新生成构建产物。PR 不会部署。
+GitHub → Actions → CI → Run workflow，选择 `master`。需要重跑时重新运行整个工作流，以便重新构建并上传镜像。PR 不会部署。
 
-等待 Backend Build and Package、Frontend Build and Package、Deploy Production 全部通过，再打开 `http://服务器公网IP`（前提是已套用 1.1 的 `nginx.conf`）。
+等待 Backend Build and Package、Frontend Build and Package、Build and Save Images、Deploy Production 全部通过，再打开 `http://服务器公网IP`（前提是已套用 1.1 的 `nginx.conf`）。`Build and Save Images` 在 GitHub runner 上 `docker build` 并 `docker save` 成 `mc-erp-images.tar.gz`；`Deploy Production` 只负责上传并 `docker load`，服务器不会 build。
 
 用户名为 `admin`，首次密码在服务器查看：
 
@@ -151,7 +146,7 @@ docker compose --env-file ../.env -f docker-compose.prod.yml logs --tail 100
 |---|---|---|
 | GitHub job | `ci.yml` 的 `deploy` | 30 分钟（外层安全网） |
 | GitHub step | `Upload and start services` | 18 分钟 |
-| 远端脚本 | `deploy/deploy.sh` 的 `timeout` | 每步 45–540 秒，约 15 分钟内收尾 |
+| 远端脚本 | `deploy/deploy.sh` 的 `timeout` | 每步 45–540 秒；SSH 硬断 16 分钟 |
 
 远端脚本每一条 `docker` 命令都套 `timeout --kill-after`：先 TERM，20 秒后 KILL。失败、超时或 SSH 中断都会触发 `trap` 清理：
 
@@ -161,9 +156,9 @@ docker compose --env-file ../.env -f docker-compose.prod.yml logs --tail 100
 - 删除 `/opt/mc-erp` 下的临时发布包；
 - 如果 `docker info` 无响应，用 sudoers 放行的 `systemctl restart docker` 重启守护进程并等待恢复。
 
-`bootstrap.sh` 还安装了每日 `mc-erp-docker-prune.timer`（`docker system prune --filter until=168h`），作为兜底防止磁盘长期增长。CI 侧的 `Cleanup remote after failure` 步骤只做进程和缓存清理，不会停止正在运行的服务。
+`bootstrap.sh` 还补了 2G swap（小内存机器 `docker load` / 重启容器时避免卡在 D 状态），并安装每日 `mc-erp-docker-prune.timer`（`docker system prune --filter until=168h`），作为兜底防止磁盘长期增长。CI 侧的 `Cleanup remote after failure` 步骤只做进程和缓存清理，不会停止正在运行的服务。
 
-部署前脚本会检查 `/var/lib/docker` 剩余空间：低于 2 GiB 先自动清理，仍低于 1 GiB 直接失败，不碰镜像。需要人工介入时：
+部署前脚本会检查 `/var/lib/docker` 剩余空间：低于 2 GiB 先自动清理，仍低于 1 GiB 直接失败，不会开始 load 镜像。需要人工介入时：
 
 ```bash
 # 看谁卡住了

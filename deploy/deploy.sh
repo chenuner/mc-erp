@@ -12,10 +12,10 @@ root=/opt/mc-erp
 app="$root/app"
 mode=${1:-deploy}
 
-# 分步预算（秒）：preflight + build + up 约 885s，CI 的 ssh / step 逾时留有余量。
+# 分步预算（秒）：preflight + load + up 约 885s，CI 的 ssh / step 逾时留有余量。
 # --wait-timeout 必须小于 UP_TIMEOUT，让 compose 自己先报健康检查失败并输出诊断。
 PREFLIGHT_TIMEOUT=45
-BUILD_TIMEOUT=300
+LOAD_TIMEOUT=300
 UP_TIMEOUT=540
 COMPOSE_WAIT_TIMEOUT=480
 DIAG_TIMEOUT=60
@@ -173,8 +173,15 @@ run 120 tar -xzf "$root/release.tar.gz" -C "$app"
 cd "$app"
 run "$PREFLIGHT_TIMEOUT" "${compose[@]}" config --quiet
 
-log "building images (cap ${BUILD_TIMEOUT}s)"
-run "$BUILD_TIMEOUT" "${compose[@]}" build
+log "loading images (cap ${LOAD_TIMEOUT}s)"
+archive="$root/mc-erp-images.tar.gz"
+[[ -f $archive ]] || { log "missing image archive: $archive" >&2; exit 1; }
+# docker load 自动解 gzip；load 后立刻删除临时包，避免占着磁盘
+run "$LOAD_TIMEOUT" docker load --input "$archive"
+rm -f "$archive"
+for image in mc-erp-backend:latest mc-erp-web:latest; do
+  run 30 docker image inspect "$image" >/dev/null 2>&1 || { log "missing image after load: $image" >&2; exit 1; }
+done
 replaced=1
 
 log "starting services (compose wait ${COMPOSE_WAIT_TIMEOUT}s, hard cap ${UP_TIMEOUT}s)"

@@ -80,12 +80,65 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  deploy:
-    name: Deploy Production
+  images:
+    name: Build and Save Images
     needs: [backend, frontend]
+    # 镜像只在要部署时才需要，PR 只验证代码能编译
     if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
-    # 外层安全网，不是预期耗时：远端脚本自己会在约 15 分钟内收尾。
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Download backend
+        uses: actions/download-artifact@v7
+        with:
+          name: backend
+          path: images/backend/publish
+
+      - name: Download frontend
+        uses: actions/download-artifact@v7
+        with:
+          name: frontend
+          path: images/frontend/dist
+
+      # 在 runner 上构建：2 核服务器不再 build / 拉基础镜像，只负责 docker load
+      - name: Build backend image
+        timeout-minutes: 8
+        run: |
+          cp backend/Dockerfile images/backend/
+          docker build --tag mc-erp-backend:latest images/backend
+
+      - name: Build frontend image
+        timeout-minutes: 5
+        run: |
+          cp frontend/Dockerfile frontend/nginx.conf images/frontend/
+          docker build --tag mc-erp-web:latest images/frontend
+
+      # 两个镜像打成一个 gzip 包：服务器只需一次 scp、一次 load
+      - name: Save images
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          docker save mc-erp-backend:latest mc-erp-web:latest | gzip -1 > mc-erp-images.tar.gz
+          ls -lh mc-erp-images.tar.gz
+
+      - name: Upload images
+        uses: actions/upload-artifact@v6
+        with:
+          name: images
+          path: mc-erp-images.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    name: Deploy Production
+    # 镜像 job 已包含 backend / frontend 的构建，这里只等镜像
+    needs: [images]
+    if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    # 外层安全网，不是预期耗时：远端脚本自己会在约 16 分钟内收尾（SSH 硬断）。
     timeout-minutes: 30
     concurrency:
       group: production-deployment
@@ -98,22 +151,15 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Download backend
+      - name: Download images
         uses: actions/download-artifact@v7
         with:
-          name: backend
-          path: release/backend/publish
-
-      - name: Download frontend
-        uses: actions/download-artifact@v7
-        with:
-          name: frontend
-          path: release/frontend/dist
+          name: images
+          path: deploy-images
 
       - name: Package release
         run: |
-          cp backend/Dockerfile release/backend/
-          cp frontend/Dockerfile frontend/nginx.conf release/frontend/
+          mkdir -p release
           cp docker-compose.prod.yml release/
           bash -n deploy/bootstrap.sh
           bash -n deploy/deploy.sh
@@ -143,8 +189,9 @@ jobs:
           hosts="$RUNNER_TEMP/deploy_known_hosts"
           options=(-i "$key" -o "UserKnownHostsFile=$hosts" -o StrictHostKeyChecking=yes -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
           # scp / ssh 本身也有硬逾时：网络黑洞或远端不响应时 runner 不会无限等待
-          timeout --kill-after=15s 600s scp "${options[@]}" -P "$DEPLOY_PORT" release.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/opt/mc-erp/release.tar.gz"
-          timeout --kill-after=30s 900s ssh "${options[@]}" -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- deploy" < deploy/deploy.sh
+          timeout --kill-after=15s 120s scp "${options[@]}" -P "$DEPLOY_PORT" release.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/opt/mc-erp/release.tar.gz"
+          timeout --kill-after=15s 600s scp "${options[@]}" -P "$DEPLOY_PORT" deploy-images/mc-erp-images.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/opt/mc-erp/mc-erp-images.tar.gz"
+          timeout --kill-after=30s 960s ssh "${options[@]}" -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- deploy" < deploy/deploy.sh
 
       # 部署步骤失败/超时后，远端可能还留着卡住的 compose 进程和临时镜像包；
       # cleanup 模式只杀进程、清缓存、删临时文件，不会停止正在运行的服务。

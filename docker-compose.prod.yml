@@ -26,8 +26,9 @@ services:
       start_period: 10s
 
   backend:
+    # 镜像由 GitHub Actions 在 runner 上 build，服务器只 docker load；禁止从这里 pull
     image: mc-erp-backend:latest
-    build: ./backend
+    pull_policy: never
     restart: unless-stopped
     logging: *default-logging
     environment:
@@ -55,8 +56,9 @@ services:
       start_period: 60s
 
   web:
+    # 同上：镜像由 CI build 并 docker save 上传，服务器只 docker load
     image: mc-erp-web:latest
-    build: ./frontend
+    pull_policy: never
     restart: unless-stopped
     logging: *default-logging
     ports:

@@ -41,6 +41,21 @@ if [[ ! -f /opt/mc-erp/.env ]]; then
 fi
 rmdir /opt/mc-erp/shared /opt/mc-erp/incoming /opt/mc-erp/releases 2>/dev/null || true
 
+# 小内存机器跑 docker load / restart 时没有 swap 会卡在内核态（D 状态），补一个 2G swap。
+if [[ -z $(swapon --show=NAME --noheadings 2>/dev/null) ]]; then
+  if (( $(df -Pk / | awk 'NR==2 {print $4}') >= 3 * 1024 * 1024 )); then
+    if [[ ! -f /swapfile ]]; then
+      fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
+      chmod 600 /swapfile
+      mkswap /swapfile
+    fi
+    swapon /swapfile
+    grep -q '^/swapfile ' /etc/fstab || printf '/swapfile none swap sw 0 0\n' >> /etc/fstab
+  else
+    echo 'Skip swap: less than 3 GiB free on /' >&2
+  fi
+fi
+
 # dockerd 卡死时，部署脚本需要重启守护进程才能恢复；只放行这一条命令，不给完整 sudo。
 cat >/etc/sudoers.d/mc-erp-deploy-docker <<'EOF'
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart docker
