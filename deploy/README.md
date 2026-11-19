@@ -22,7 +22,7 @@ sudo bash deploy/bootstrap.sh
 
 脚本只安装 Docker 及 Compose，使用 Ubuntu 已有的 SSH 和 OpenSSL；创建 `deploy` 用户、部署专用 SSH 密钥和 `/opt/mc-erp/.env`。重复运行不会重置密码。Docker 用户组具有等同 root 的权限，应严格保护部署密钥和 GitHub 默认分支。
 
-已执行旧版 bootstrap、但尚未部署的服务器，在源码目录执行 `git pull` 后重新运行 `sudo bash deploy/bootstrap.sh`。脚本会将旧的 `shared/.env` 移到 `/opt/mc-erp/.env`，保留所有密码和 SSH 密钥，并移除旧版空目录。已配置的 GitHub Secrets 和 Variables 不需要修改。
+已执行旧版 bootstrap、但尚未部署的服务器，在源码目录执行 `git pull` 后重新运行 `sudo bash deploy/bootstrap.sh`。脚本会将旧的 `shared/.env` 移到 `/opt/mc-erp/.env`，保留所有密码和 SSH 密钥，并移除旧版空目录。已配置的 GitHub Secrets 和 Variables 不需要修改。新增的 docker 重启 sudoers 规则和每日清理 timer 也由这次重跑安装，建议所有服务器都重跑一次。
 
 服务器固定目录为：
 
@@ -141,8 +141,44 @@ docker compose --env-file ../.env -f docker-compose.prod.yml ps
 docker compose --env-file ../.env -f docker-compose.prod.yml logs --tail 100
 ```
 
-以上命令使用 `deploy` 用户或 root 执行。健康检查失败时 Actions 会报告失败并输出容器日志；不会自动回滚数据库迁移。发布可能有短暂停机。
+以上命令使用 `deploy` 用户或 root 执行。健康检查失败时 Actions 会报告失败，并按 `postgres` / `backend` / `web` 分别输出容器状态、健康检查记录和日志；不会自动回滚数据库迁移。发布可能有短暂停机。
+
+### 5.1 超时与清理（防止 docker 卡死拖垮磁盘）
+
+部署链路有三层硬逾时，任何一层生效都不会让 docker 操作无限占住磁盘 I/O：
+
+| 层 | 位置 | 上限 |
+|---|---|---|
+| GitHub job | `ci.yml` 的 `deploy` | 30 分钟（外层安全网） |
+| GitHub step | `Upload and start services` | 18 分钟 |
+| 远端脚本 | `deploy/deploy.sh` 的 `timeout` | 每步 45–540 秒，约 15 分钟内收尾 |
+
+远端脚本每一条 `docker` 命令都套 `timeout --kill-after`：先 TERM，20 秒后 KILL。失败、超时或 SSH 中断都会触发 `trap` 清理：
+
+- 杀掉卡住的 `docker compose` 进程；
+- 已经替换过镜像时才 `compose down --remove-orphans` 停掉半启动的栈，早期失败保留旧版本继续运行；
+- `docker builder prune --all` + `docker image prune` 释放构建缓存和悬空镜像；
+- 删除 `/opt/mc-erp` 下的临时发布包；
+- 如果 `docker info` 无响应，用 sudoers 放行的 `systemctl restart docker` 重启守护进程并等待恢复。
+
+`bootstrap.sh` 还安装了每日 `mc-erp-docker-prune.timer`（`docker system prune --filter until=168h`），作为兜底防止磁盘长期增长。CI 侧的 `Cleanup remote after failure` 步骤只做进程和缓存清理，不会停止正在运行的服务。
+
+部署前脚本会检查 `/var/lib/docker` 剩余空间：低于 2 GiB 先自动清理，仍低于 1 GiB 直接失败，不碰镜像。需要人工介入时：
+
+```bash
+# 看谁卡住了
+ps -eo pid,stat,etime,cmd | grep -E 'docker (compose|build|load)' | grep -v grep
+sudo systemctl restart docker
+# 手动清一次
+docker builder prune --all --force
+docker image prune --force
+docker system df
+```
+
+`deploy/deploy.sh` 也支持手动跑 `bash deploy/deploy.sh cleanup`（在服务器上，用 `deploy` 用户或 root），只做清理、不停服务。
+
+容器日志已限制为 `10m × 3` 份，崩溃循环不会写满磁盘。
 
 生产数据库、上传原图和日志分别保存在 `mc-erp-production_pgdata`、`mc-erp-production_storage`、`mc-erp-production_logs` 卷中，与本地开发数据隔离。更新或重启容器不会清空数据；禁止执行 `docker compose down -v`。备份必须覆盖数据库、原图及服务器 `.env`，迁移前先做备份。已有数据库的密码不能只通过修改 `.env` 更换，需要同步修改 PostgreSQL 角色密码。
 
-`INITIAL_ADMIN_PASSWORD` 仅在空数据库初始化时读取，更改该变量不会重置已有用户密码。每次发布替换固定应用目录，不维护版本目录或软链接。旧的无标签镜像可以在确认部署成功后定期清理，不要删除持久卷。
+`INITIAL_ADMIN_PASSWORD` 仅在空数据库初始化时读取，更改该变量不会重置已有用户密码。每次发布替换固定应用目录，不维护版本目录或软链接。旧的无标签镜像和构建缓存由部署脚本及每日 timer 自动清理，不要删除持久卷。

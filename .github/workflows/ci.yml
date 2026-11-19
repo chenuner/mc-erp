@@ -85,7 +85,8 @@ jobs:
     needs: [backend, frontend]
     if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 外层安全网，不是预期耗时：远端脚本自己会在约 15 分钟内收尾。
+    timeout-minutes: 30
     concurrency:
       group: production-deployment
       cancel-in-progress: false
@@ -118,21 +119,49 @@ jobs:
           bash -n deploy/deploy.sh
           tar -czf release.tar.gz -C release .
 
-      - name: Upload and start services
+      # 密钥文件保留到 job 结束，失败时兜底清理步骤还要用它登录
+      - name: Prepare SSH key
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          : "${DEPLOY_HOST:?Set repository variable DEPLOY_HOST}"
           : "${DEPLOY_SSH_KEY:?Set repository secret DEPLOY_SSH_KEY}"
           : "${DEPLOY_KNOWN_HOSTS:?Set repository secret DEPLOY_KNOWN_HOSTS}"
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/deploy_key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy_known_hosts"
+
+      - name: Upload and start services
+        id: deploy
+        # 必须小于 job 超时，才能给下面的兜底清理留出执行机会
+        timeout-minutes: 18
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?Set repository variable DEPLOY_HOST}"
           key="$RUNNER_TEMP/deploy_key"
           hosts="$RUNNER_TEMP/deploy_known_hosts"
-          trap 'rm -f "$key" "$hosts"' EXIT
-          umask 077
-          printf '%s\n' "$DEPLOY_SSH_KEY" > "$key"
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$hosts"
-          options=(-i "$key" -o "UserKnownHostsFile=$hosts" -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=20)
-          scp "${options[@]}" -P "$DEPLOY_PORT" release.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/opt/mc-erp/release.tar.gz"
-          ssh "${options[@]}" -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "bash -s" < deploy/deploy.sh
+          options=(-i "$key" -o "UserKnownHostsFile=$hosts" -o StrictHostKeyChecking=yes -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+          # scp / ssh 本身也有硬逾时：网络黑洞或远端不响应时 runner 不会无限等待
+          timeout --kill-after=15s 600s scp "${options[@]}" -P "$DEPLOY_PORT" release.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/opt/mc-erp/release.tar.gz"
+          timeout --kill-after=30s 900s ssh "${options[@]}" -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- deploy" < deploy/deploy.sh
+
+      # 部署步骤失败/超时后，远端可能还留着卡住的 compose 进程和临时镜像包；
+      # cleanup 模式只杀进程、清缓存、删临时文件，不会停止正在运行的服务。
+      - name: Cleanup remote after failure
+        if: always() && (steps.deploy.outcome == 'failure' || steps.deploy.outcome == 'cancelled')
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/deploy_key"
+          hosts="$RUNNER_TEMP/deploy_known_hosts"
+          if [[ ! -f "$key" || -z "${DEPLOY_HOST:-}" ]]; then
+            echo "No SSH key or DEPLOY_HOST, skipping remote cleanup."
+            exit 0
+          fi
+          options=(-i "$key" -o "UserKnownHostsFile=$hosts" -o StrictHostKeyChecking=yes -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+          timeout --kill-after=15s 240s ssh "${options[@]}" -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- cleanup" < deploy/deploy.sh || true
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/deploy_key" "$RUNNER_TEMP/deploy_known_hosts"
