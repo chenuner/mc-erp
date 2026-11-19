@@ -150,7 +150,7 @@ internal static class IntegrationChecks
             var manual = await Create(siteA, documentId);
             Check(manual.FileItemId == null && manual.FileName == null, "manual receipt has no image");
             Check(manual.Type == pendingId && manual.TypeLabel == "待分類", "manual receipt starts as pending category");
-            Check(manual.OcrStatus == "NotStarted" && !manual.IsConfirmed, "manual receipt starts as draft");
+            Check(manual.OcrStatus == "NotStarted", "manual receipt starts without OCR");
             using (var invalidForm = new MultipartFormDataContent())
             {
                 invalidForm.Add(new ByteArrayContent([1, 2, 3]), "file", "bad.png");
@@ -179,10 +179,9 @@ internal static class IntegrationChecks
             var first = await Upload(siteA, documentId, png);
             var second = await Upload(siteB, secondDocumentId, png);
             Check(first.Md5 == Convert.ToHexStringLower(MD5.HashData(png)) && second.Md5 == first.Md5, "MD5 retained without deduplication");
-            Check(first.Amount == null && first.ReceiptDate == null && !first.IsConfirmed, "draft null fields");
+            Check(first.Amount == null && first.ReceiptDate == null, "new receipt has no date or amount");
             using (var missing = await client.PostAsync($"accounting/receipts/{first.Id}/recognize", null)) Check(missing.StatusCode == HttpStatusCode.BadRequest, "OCR unavailable preserves draft");
             using (var image = await client.GetAsync($"accounting/receipts/{first.Id}/image")) Check((await image.Content.ReadAsByteArrayAsync()).SequenceEqual(png), "original retained");
-            using (var invalidConfirm = await client.PostAsJsonAsync($"accounting/receipts/{first.Id}/confirm", new { first.Version })) Check(invalidConfirm.StatusCode == HttpStatusCode.BadRequest, "incomplete confirmation rejected");
             var previousOriginal = second.FileItemId;
             second = await Attach(second.Id, png);
             Check(second.FileItemId != previousOriginal, "image replacement rewrites original");
@@ -204,23 +203,9 @@ internal static class IntegrationChecks
             second = await Save(second, categoryA, new DateOnly(2026, 12, 31));
             manual = await Save(manual, categoryB, new DateOnly(2026, 6, 1));
             Check(manual.FileItemId == null && manual.Type == materialId && manual.TypeLabel == "材料", "manual receipt saves category without image");
-            var confirmedManual = await Post($"accounting/receipts/{manual.Id}/confirm", new { manual.Version });
-            Check(confirmedManual.GetProperty("isConfirmed").GetBoolean(), "manual receipt confirmed without image");
-            Check(confirmedManual.GetProperty("fileItemId").ValueKind == JsonValueKind.Null, "confirmed manual receipt stays image-free");
             using (var staleSave = await client.PutAsJsonAsync($"accounting/receipts/{first.Id}",
                 new UpdateReceiptRequest(staleVersion, siteA, documentId, materialId, categoryB, new DateOnly(2026, 1, 1), 1m, "HKD", null, null, null)))
                 Check(staleSave.StatusCode == HttpStatusCode.Conflict, "stale edit rejected");
-            using (var stale = await client.PostAsJsonAsync($"accounting/receipts/{first.Id}/confirm", new { version = staleVersion })) Check(stale.StatusCode == HttpStatusCode.Conflict, "stale version rejected");
-            var confirmed = await Post($"accounting/receipts/{first.Id}/confirm", new { first.Version });
-            Check(confirmed.GetProperty("isConfirmed").GetBoolean(), "manual confirm");
-            using (var lockedForm = new MultipartFormDataContent())
-            {
-                var lockedImage = new ByteArrayContent(png);
-                lockedImage.Headers.ContentType = new MediaTypeHeaderValue("image/png");
-                lockedForm.Add(lockedImage, "file", "locked.png");
-                using var locked = await client.PostAsync($"accounting/receipts/{first.Id}/image", lockedForm);
-                Check(locked.StatusCode == HttpStatusCode.BadRequest, "confirmed receipt image locked");
-            }
             var filtered = await Get($"accounting/receipts?start=2026-01-01&end=2026-01-01&type={materialId}&siteId={siteA}");
             Check(filtered.GetProperty("total").GetInt32() == 1, "inclusive date and actual site filtering");
             filtered = await Get($"accounting/receipts?siteCategoryDictId={categoryB}");
@@ -258,16 +243,23 @@ internal static class IntegrationChecks
             using (var archive = new ZipArchive(noMd5, ZipArchiveMode.Read)) Check(archive.Entries.Count == 1, "historical null MD5 still exports");
             first = await client.GetFromJsonAsync<ReceiptResponse>($"accounting/receipts/{first.Id}") ?? throw new InvalidOperationException();
             first = await Save(first, categoryB, new DateOnly(2026, 1, 1));
-            Check(!first.IsConfirmed && first.ManuallyEdited, "editing confirmed receipt requires reconfirmation");
+            Check(first.Amount == 110m && first.CurrencyCode == "HKD", "saved receipt keeps amount and currency");
 
-            // 必填規則：保存也要求完整資料（與前端一致）
+            // 必填規則：導出地盤分類仍必填；日期、金額、幣種可以留空
             var doomed = await Upload(siteA, documentId, png);
             using (var incomplete = await client.PutAsJsonAsync($"accounting/receipts/{doomed.Id}",
                 new UpdateReceiptRequest(doomed.Version, siteA, documentId, materialId, null, null, null, null, null, null, null)))
-                Check(incomplete.StatusCode == HttpStatusCode.BadRequest, "incomplete save rejected");
+                Check(incomplete.StatusCode == HttpStatusCode.BadRequest, "site category still required");
+            using (var sparse = await client.PutAsJsonAsync($"accounting/receipts/{doomed.Id}",
+                new UpdateReceiptRequest(doomed.Version, siteA, documentId, materialId, categoryA, null, null, null, null, null, null)))
+            {
+                Check(sparse.StatusCode == HttpStatusCode.OK, "date, amount and currency are optional");
+                doomed = (await sparse.Content.ReadFromJsonAsync<ReceiptResponse>())!;
+                Check(doomed.ReceiptDate == null && doomed.Amount == null && doomed.CurrencyCode == null, "optional fields stay empty");
+            }
+            using (var confirmGone = await client.PostAsJsonAsync($"accounting/receipts/{doomed.Id}/confirm", new { doomed.Version }))
+                Check(confirmGone.StatusCode == HttpStatusCode.NotFound, "confirm endpoint removed");
             doomed = await Save(doomed, categoryA, new DateOnly(2026, 3, 1));
-            using (var confirmedDoomed = await client.PostAsJsonAsync($"accounting/receipts/{doomed.Id}/confirm", new { doomed.Version }))
-                Check(confirmedDoomed.StatusCode == HttpStatusCode.OK, "deletable receipt confirmed");
             var doomedFileId = doomed.FileItemId!.Value;
             using (var deleted = await client.DeleteAsync($"accounting/receipts/{doomed.Id}"))
                 Check(deleted.StatusCode == HttpStatusCode.NoContent, "receipt deleted");

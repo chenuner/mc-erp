@@ -10,7 +10,7 @@ Authorization: Bearer {{token}}
 GET {{baseUrl}}/api/accounting/receipts?start=2026-01-01&end=2026-12-31&page=1&pageSize=20
 Authorization: Bearer {{token}}
 
-### Create a draft manually, no image required
+### Create a receipt manually, no image required
 POST {{baseUrl}}/api/accounting/receipts
 Authorization: Bearer {{token}}
 Content-Type: application/json
@@ -18,6 +18,25 @@ Content-Type: application/json
 {
   "siteId": "REPLACE_WITH_SITE_ID",
   "documentTypeDictId": "REPLACE_WITH_DOCUMENT_TYPE_DICT_ID"
+}
+
+### Save receipt (site, document type, category and export category required; date/amount/currency optional)
+PUT {{baseUrl}}/api/accounting/receipts/{{receiptId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "version": "REPLACE_WITH_RECEIPT_VERSION",
+  "siteId": "REPLACE_WITH_SITE_ID",
+  "documentTypeDictId": "REPLACE_WITH_DOCUMENT_TYPE_DICT_ID",
+  "type": "REPLACE_WITH_ACCOUNTING_DICT_ID",
+  "siteCategoryDictId": "REPLACE_WITH_SITE_CATEGORY_DICT_ID",
+  "receiptDate": null,
+  "amount": null,
+  "currencyCode": null,
+  "merchantName": null,
+  "invoiceNumber": null,
+  "remark": null
 }
 
 ### Attach or replace the original image (JPEG / PNG, max 4 MB)
@@ -32,7 +51,7 @@ Content-Type: image/png
 < ./receipt.png
 --Boundary--
 
-### Recognize saved image
+### Recognize saved image (returns suggestions, does not change the receipt)
 POST {{baseUrl}}/api/accounting/receipts/{{receiptId}}/recognize
 Authorization: Bearer {{token}}
 
@@ -41,5 +60,5 @@ DELETE {{baseUrl}}/api/accounting/receipts/{{receiptId}}
 Authorization: Bearer {{token}}
 
 ### Download all matching original images, not just a page
-GET {{baseUrl}}/api/accounting/receipts/export?start=2026-01-01&end=2026-12-31&isConfirmed=true
+GET {{baseUrl}}/api/accounting/receipts/export?start=2026-01-01&end=2026-12-31
 Authorization: Bearer {{token}}

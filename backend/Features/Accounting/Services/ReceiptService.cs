@@ -1,6 +1,5 @@
 using System.Text.RegularExpressions;
 using MC.Erp.Common.Infrastructure.Ocr;
-using MC.Erp.Common.Security;
 using MC.Erp.Features.Accounting.Entities;
 using MC.Erp.Features.Accounting.Repositories;
 using MC.Erp.Features.Attendance.Services;
@@ -15,8 +14,12 @@ public sealed record UpdateReceiptRequest(Guid Version, Guid SiteId, Guid Docume
     Guid Type, Guid? SiteCategoryDictId, DateOnly? ReceiptDate, decimal? Amount,
     string? CurrencyCode, string? MerchantName, string? InvoiceNumber, string? Remark);
 
+/// <summary>OCR 建議值；只供前端參考填入，不會直接改寫票據資料。</summary>
+public sealed record OcrSuggestion(string? MerchantName, DateOnly? ReceiptDate, decimal? Amount,
+    string? CurrencyCode, string? InvoiceNumber, string? CategoryValue);
+
 public sealed class ReceiptService(ReceiptRepository repo, FileService files, SysDictService dicts,
-    AttendanceServices attendance, IOcrService ocr, ICurrentUser user, ILogger<ReceiptService> logger)
+    AttendanceServices attendance, IOcrService ocr, ILogger<ReceiptService> logger)
 {
     public bool OcrConfigured => ocr.IsConfigured;
     public Task<(List<Receipt> Items, int Total)> ListAsync(ReceiptFilter filter, int page, int pageSize)
@@ -47,11 +50,10 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
         return await FindAsync(receipt.Id);
     }
 
-    /// <summary>補上或更換票據原圖；有原圖後才可 OCR。</summary>
+    /// <summary>補上或更換票據原圖；有原圖後才可 OCR。更換原圖會清除舊的識別結果。</summary>
     public async Task<Receipt> AttachImageAsync(Guid id, IFormFile image)
     {
         var receipt = await FindAsync(id);
-        if (receipt.IsConfirmed) throw new InvalidOperationException("已確認票據不可更換原圖");
         if (receipt.OcrStatus == "Processing" && receipt.OcrStartedAt > DateTime.UtcNow.AddMinutes(-3))
             throw new InvalidOperationException("識別進行中，請稍後再更換原圖");
         var mime = await CheckImageAsync(image);
@@ -128,14 +130,12 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
         CheckModel(documentType.Value);
         var type = await DictAsync(request.Type, "Accounting");
         if (request.SiteCategoryDictId is { } siteCategory) await DictAsync(siteCategory, "AccountingSiteCategory");
-        // 必填規則與前端一致：保存與確認都要求完整資料
-        if (request.ReceiptDate is null) throw new InvalidOperationException("請選擇票據日期");
-        if (request.Amount is null or <= 0) throw new InvalidOperationException("請填寫正數金額");
-        if (string.IsNullOrWhiteSpace(request.CurrencyCode)) throw new InvalidOperationException("請選擇幣種");
+        // 必填規則與前端一致：地盤、票據類型、支出分類、導出地盤分類；日期、金額、幣種可稍後補
         if (request.SiteCategoryDictId is null) throw new InvalidOperationException("請選擇導出地盤分類");
         if (type.Value == "pending") throw new InvalidOperationException("請選擇實際支出分類，不能是「待分類」");
-        if (request.Amount is < 0 or > 9999999999999999.99m || request.Amount != decimal.Round(request.Amount ?? 0, 2) && request.Amount != null)
-            throw new InvalidOperationException("金額須為非負數且最多兩位小數");
+        if (request.Amount is <= 0) throw new InvalidOperationException("金額必須大於 0");
+        if (request.Amount is > 9999999999999999.99m) throw new InvalidOperationException("金額過大");
+        if (request.Amount is { } amount && amount != decimal.Round(amount, 2)) throw new InvalidOperationException("金額最多兩位小數");
         var currency = request.CurrencyCode?.Trim().ToUpperInvariant();
         if (!string.IsNullOrEmpty(currency) && !Regex.IsMatch(currency, "^[A-Z]{3}$")) throw new InvalidOperationException("幣種須為三位英文字母，例如 HKD");
         if (request.MerchantName?.Length > 255 || request.InvoiceNumber?.Length > 100 || request.Remark?.Length > 255)
@@ -154,10 +154,6 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
         receipt.MerchantName = request.MerchantName?.Trim();
         receipt.InvoiceNumber = request.InvoiceNumber?.Trim();
         receipt.Remark = request.Remark?.Trim();
-        receipt.ManuallyEdited = true;
-        receipt.IsConfirmed = false;
-        receipt.ConfirmedAt = null;
-        receipt.ConfirmedById = null;
         if (modelChanged || receipt.OcrStatus == "Processing") receipt.OcrStatus = "NotStarted";
         await repo.InTransactionAsync(async () =>
         {
@@ -167,36 +163,15 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
         return receipt;
     }
 
-    public async Task<Receipt> ConfirmAsync(Guid id, Guid version)
+    /// <summary>辨識原圖並回傳建議欄位；不改寫票據資料，由使用者核對後自行填入及保存。</summary>
+    public async Task<(Receipt Receipt, OcrSuggestion Fields)> RecognizeAsync(Guid id, Guid? documentTypeDictId = null)
     {
         var receipt = await FindAsync(id);
-        if (receipt.Version != version) throw new DbUpdateConcurrencyException();
-        if (receipt.OcrStatus == "Processing") throw new InvalidOperationException("識別進行中");
-        await CheckSiteAsync(receipt.SiteId);
-        await DictAsync(receipt.DocumentTypeDictId, "AccountingDocumentType");
-        var type = await DictAsync(receipt.Type, "Accounting");
-        if (receipt.SiteCategoryDictId is { } category) await DictAsync(category, "AccountingSiteCategory");
-        if (receipt.ReceiptDate is null || receipt.Amount is null or <= 0 || string.IsNullOrEmpty(receipt.CurrencyCode)
-            || receipt.SiteCategoryDictId is null || type.Value == "pending")
-            throw new InvalidOperationException("請填寫日期、正數金額、幣種、支出分類及導出地盤分類");
-        receipt.IsConfirmed = true;
-        receipt.ConfirmedAt = DateTime.UtcNow;
-        receipt.ConfirmedById = user.UserId;
-        await repo.SaveAsync(receipt);
-        return receipt;
-    }
-
-    public async Task<Receipt> RecognizeAsync(Guid id, Guid? documentTypeDictId = null)
-    {
-        var receipt = await FindAsync(id);
-        if (receipt.IsConfirmed) throw new InvalidOperationException("已確認票據不可重新識別");
         if (receipt.FileItemId is null) throw new InvalidOperationException("尚未上傳原圖，請先上傳圖片再識別");
         if (!ocr.IsConfigured) throw new InvalidOperationException("Azure 識別服務尚未配置，原圖已保存，可手動填寫");
         var documentType = await DictAsync(documentTypeDictId ?? receipt.DocumentTypeDictId, "AccountingDocumentType");
         CheckModel(documentType.Value);
         if (!await repo.StartRecognitionAsync(receipt)) throw new DbUpdateConcurrencyException();
-        receipt.DocumentTypeDictId = documentType.Id;
-        receipt.DocumentTypeDict = documentType;
         try
         {
             var download = await files.下载Async(receipt.FileItemId.Value) ?? throw new InvalidOperationException("原圖不存在");
@@ -205,27 +180,8 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
             receipt.OcrResultJson = result.Json;
             receipt.OcrText = result.Text;
             receipt.OcrStatus = "Succeeded";
-            if (!receipt.ManuallyEdited)
-            {
-                receipt.MerchantName = result.MerchantName is { } merchant ? merchant[..Math.Min(merchant.Length, 255)] : null;
-                receipt.ReceiptDate = result.Date;
-                receipt.Amount = result.Amount;
-                receipt.CurrencyCode = result.CurrencyCode is { Length: 3 } ? result.CurrencyCode.ToUpperInvariant() : null;
-                receipt.InvoiceNumber = result.InvoiceNumber is { } number ? number[..Math.Min(number.Length, 100)] : null;
-                var suggested = SuggestCategory(result);
-                var category = (await dicts.ListByGroupAsync("Accounting")).FirstOrDefault(dict => dict.Enabled && dict.Value == suggested);
-                if (category != null)
-                {
-                    receipt.Type = category.Id;
-                    receipt.TypeDict = category;
-                    await repo.InTransactionAsync(async () =>
-                    {
-                        await files.设置类别Async(receipt.FileItemId.Value, category.Id);
-                        await repo.SaveRecognitionAsync(receipt);
-                    });
-                    return receipt;
-                }
-            }
+            await repo.SaveRecognitionAsync(receipt);
+            return (receipt, Suggest(result));
         }
         catch (DbUpdateConcurrencyException) { throw; }
         catch (Exception exception) when (exception is Azure.RequestFailedException or OperationCanceledException or IOException or InvalidOperationException)
@@ -234,10 +190,18 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
             receipt.OcrStatus = "Failed";
             receipt.OcrError = exception is OperationCanceledException ? "識別超時或請求已取消，原圖保留，請重試"
                 : exception is InvalidOperationException ? exception.Message : "識別服務失敗，原圖保留，請重試或手動填寫";
+            await repo.SaveRecognitionAsync(receipt);
+            return (receipt, new OcrSuggestion(null, null, null, null, null, null));
         }
-        await repo.SaveRecognitionAsync(receipt);
-        return receipt;
     }
+
+    private static OcrSuggestion Suggest(OcrResult result) => new(
+        result.MerchantName is { } merchant ? merchant[..Math.Min(merchant.Length, 255)] : null,
+        result.Date,
+        result.Amount,
+        result.CurrencyCode is { Length: 3 } ? result.CurrencyCode.ToUpperInvariant() : null,
+        result.InvoiceNumber is { } number ? number[..Math.Min(number.Length, 100)] : null,
+        SuggestCategory(result));
 
     public static string? SuggestCategory(OcrResult result)
     {

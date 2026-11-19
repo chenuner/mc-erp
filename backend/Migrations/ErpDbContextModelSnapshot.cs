@@ -32,12 +32,6 @@ namespace MC.Erp.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
-                    b.Property<DateTime?>("ConfirmedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("ConfirmedById")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -58,13 +52,7 @@ namespace MC.Erp.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
-                    b.Property<bool>("IsConfirmed")
-                        .HasColumnType("boolean");
-
                     b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("ManuallyEdited")
                         .HasColumnType("boolean");
 
                     b.Property<string>("MerchantName")

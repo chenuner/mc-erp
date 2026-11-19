@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 namespace MC.Erp.Features.Accounting.Repositories;
 
 public sealed record ReceiptFilter(Guid? SiteId = null, Guid? DocumentTypeDictId = null,
-    Guid? Type = null, Guid? SiteCategoryDictId = null, DateOnly? Start = null, DateOnly? End = null, bool? IsConfirmed = null);
+    Guid? Type = null, Guid? SiteCategoryDictId = null, DateOnly? Start = null, DateOnly? End = null);
 
 public sealed class ReceiptRepository(ErpDbContext db, IHttpContextAccessor context)
 {
@@ -23,8 +23,7 @@ public sealed class ReceiptRepository(ErpDbContext db, IHttpContextAccessor cont
         .Where(receipt => filter.Type == null || receipt.Type == filter.Type)
         .Where(receipt => filter.SiteCategoryDictId == null || receipt.SiteCategoryDictId == filter.SiteCategoryDictId)
         .Where(receipt => filter.Start == null || receipt.ReceiptDate >= filter.Start)
-        .Where(receipt => filter.End == null || receipt.ReceiptDate <= filter.End)
-        .Where(receipt => filter.IsConfirmed == null || receipt.IsConfirmed == filter.IsConfirmed);
+        .Where(receipt => filter.End == null || receipt.ReceiptDate <= filter.End);
 
     public async Task<(List<Receipt> Items, int Total)> ListAsync(ReceiptFilter filter, int page, int pageSize)
     {
@@ -76,7 +75,7 @@ public sealed class ReceiptRepository(ErpDbContext db, IHttpContextAccessor cont
         var version = Guid.NewGuid();
         var started = DateTime.UtcNow;
         var changed = await db.Receipts.Where(item => item.Id == receipt.Id && item.Version == receipt.Version
-            && !item.IsConfirmed && (item.OcrStatus != "Processing" || item.OcrStartedAt < staleBefore))
+            && (item.OcrStatus != "Processing" || item.OcrStartedAt < staleBefore))
             .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.OcrStatus, "Processing")
                 .SetProperty(item => item.OcrStartedAt, started).SetProperty(item => item.OcrError, (string?)null)
                 .SetProperty(item => item.Version, version), Token);

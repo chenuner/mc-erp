@@ -34,9 +34,5 @@ public sealed class Receipt : AuditableEntity
     public string? OcrResultJson { get; set; }
     public string? OcrText { get; set; }
     public DateTime? OcrStartedAt { get; set; }
-    public bool ManuallyEdited { get; set; }
-    public bool IsConfirmed { get; set; }
-    public Guid? ConfirmedById { get; set; }
-    public DateTime? ConfirmedAt { get; set; }
     public Guid Version { get; set; } = Guid.NewGuid();
 }

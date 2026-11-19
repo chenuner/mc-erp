@@ -26,8 +26,20 @@ export interface ReceiptDto {
   ocrError: string | null
   ocrText: string | null
   ocrResult: { documents?: { fields?: Record<string, { confidence?: number; content?: string }> }[] } | null
-  manuallyEdited: boolean
-  isConfirmed: boolean
+}
+
+export interface OcrSuggestion {
+  merchantName: string | null
+  receiptDate: string | null
+  amount: number | null
+  currencyCode: string | null
+  invoiceNumber: string | null
+  categoryValue: string | null
+}
+
+export interface RecognizeResult {
+  receipt: ReceiptDto
+  fields: OcrSuggestion
 }
 
 export interface ReceiptQuery {
@@ -37,7 +49,6 @@ export interface ReceiptQuery {
   siteCategoryDictId?: string
   start?: string
   end?: string
-  isConfirmed?: boolean
 }
 
 export type UpdateReceipt = Pick<ReceiptDto, 'version' | 'siteId' | 'documentTypeDictId' | 'siteCategoryDictId'
@@ -67,16 +78,13 @@ export async function attachReceiptImage(id: string, file: File): Promise<Receip
   return await request.post(`/accounting/receipts/${id}/image`, form, { timeout: 60000 }) as ReceiptDto
 }
 
-export async function recognizeReceipt(id: string, documentTypeDictId?: string): Promise<ReceiptDto> {
-  return await request.post(`/accounting/receipts/${id}/recognize`, null, { params: { documentTypeDictId }, timeout: 150000 }) as ReceiptDto
+/** 辨識原圖，回傳建議欄位（不會改寫票據資料）。 */
+export async function recognizeReceipt(id: string, documentTypeDictId?: string): Promise<RecognizeResult> {
+  return await request.post(`/accounting/receipts/${id}/recognize`, null, { params: { documentTypeDictId }, timeout: 150000 }) as RecognizeResult
 }
 
 export async function updateReceipt(id: string, payload: UpdateReceipt): Promise<ReceiptDto> {
   return await request.put(`/accounting/receipts/${id}`, payload) as ReceiptDto
-}
-
-export async function confirmReceipt(id: string, version: string): Promise<ReceiptDto> {
-  return await request.post(`/accounting/receipts/${id}/confirm`, { version }) as ReceiptDto
 }
 
 /** 刪除票據，連同原圖一併清理。 */
