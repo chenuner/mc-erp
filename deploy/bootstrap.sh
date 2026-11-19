@@ -41,6 +41,17 @@ if [[ ! -f /opt/mc-erp/.env ]]; then
 fi
 rmdir /opt/mc-erp/shared /opt/mc-erp/incoming /opt/mc-erp/releases 2>/dev/null || true
 
+# 小内存机器跑 docker load / restart 时没有 swap 会卡在内核态（D 状态），补一个 2G swap
+if ! swapon --show | grep -q '/swapfile'; then
+  if [[ ! -f /swapfile ]]; then
+    fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
+    chmod 600 /swapfile
+    mkswap /swapfile
+  fi
+  swapon /swapfile
+  grep -q '^/swapfile ' /etc/fstab || printf '/swapfile none swap sw 0 0\n' >> /etc/fstab
+fi
+
 echo 'Ready. Deploy user: deploy; application directory: /opt/mc-erp'
 echo 'SSH private key: /home/deploy/.ssh/github_actions (GitHub Secret only)'
 echo 'Runtime secrets: /opt/mc-erp/.env (keep on server)'

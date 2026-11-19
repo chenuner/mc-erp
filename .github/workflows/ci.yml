@@ -80,9 +80,58 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  images:
+    name: Build Images
+    needs: [backend, frontend]
+    # 镜像只在要部署时才需要，PR 只验证代码能编译
+    if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Download backend
+        uses: actions/download-artifact@v7
+        with:
+          name: backend
+          path: images/backend/publish
+
+      - name: Download frontend
+        uses: actions/download-artifact@v7
+        with:
+          name: frontend
+          path: images/frontend/dist
+
+      # 在 runner 上构建，服务器只负责 docker load；2 核小机器不再需要编译
+      - name: Build backend image
+        run: |
+          cp backend/Dockerfile images/backend/
+          docker build --tag mc-erp-backend:latest images/backend
+
+      - name: Build frontend image
+        run: |
+          cp frontend/Dockerfile frontend/nginx.conf images/frontend/
+          docker build --tag mc-erp-web:latest images/frontend
+
+      - name: Save images
+        run: |
+          docker save mc-erp-backend:latest > mc-erp-backend.tar
+          docker save mc-erp-web:latest > mc-erp-web.tar
+          ls -lh mc-erp-*.tar
+
+      - name: Upload images
+        uses: actions/upload-artifact@v6
+        with:
+          name: images
+          path: mc-erp-*.tar
+          if-no-files-found: error
+          retention-days: 1
+
   deploy:
     name: Deploy Production
-    needs: [backend, frontend]
+    # 需要镜像 job：服务器不自己 build，只 docker load CI 产出的镜像
+    needs: [backend, frontend, images]
     if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -109,10 +158,14 @@ jobs:
           name: frontend
           path: release/frontend/dist
 
+      - name: Download images
+        uses: actions/download-artifact@v7
+        with:
+          name: images
+          path: release/images
+
       - name: Package release
         run: |
-          cp backend/Dockerfile release/backend/
-          cp frontend/Dockerfile frontend/nginx.conf release/frontend/
           cp docker-compose.prod.yml release/
           bash -n deploy/bootstrap.sh
           bash -n deploy/deploy.sh
@@ -135,4 +188,5 @@ jobs:
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$hosts"
           options=(-i "$key" -o "UserKnownHostsFile=$hosts" -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=20)
           scp "${options[@]}" -P "$DEPLOY_PORT" release.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/opt/mc-erp/release.tar.gz"
+          scp "${options[@]}" -P "$DEPLOY_PORT" release/images/mc-erp-backend.tar release/images/mc-erp-web.tar "$DEPLOY_USER@$DEPLOY_HOST:/opt/mc-erp/"
           ssh "${options[@]}" -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "bash -s" < deploy/deploy.sh

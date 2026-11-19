@@ -29,15 +29,10 @@ sudo bash deploy/bootstrap.sh
 ```text
 /opt/mc-erp/
 ├── .env                       # 服务器运行密钥
+├── mc-erp-backend.tar         # CI 构建的镜像（部署后自动删除）
+├── mc-erp-web.tar
 └── app/                       # CI 上传的生产产物
-	├── docker-compose.prod.yml
-	├── backend/
-	│   ├── Dockerfile
-	│   └── publish/
-	└── frontend/
-		├── Dockerfile
-		├── nginx.conf
-		└── dist/
+	└── docker-compose.prod.yml
 ```
 
 云服务器安全组放行 TCP 22、80、443。数据库和 web 容器没有对公网映射，不要放行 5432 或 8080。若已启用 UFW，先确保实际 SSH 端口已放行，再执行 `sudo ufw allow 80,443/tcp`。这里假定 SSH 端口为 22。
@@ -151,7 +146,11 @@ docker compose --env-file ../.env -f docker-compose.prod.yml logs --tail 100
 | 宿主機（SSH 登入後） | `http://127.0.0.1:8080/health` | compose 把 web 映射到宿主機回環 8080 |
 | 公網 | `http://伺服器公網IP/health` | 宿主機 nginx 轉發到 8080 |
 
-部署脚本先 `docker compose build`，再 `up --wait`，健康等待上限 660 秒。首次啟動 backend 要跑 EF 遷移和種子資料，慢機器上可能要好幾分鐘；`backend` 健康檢查因此給了 180 秒 `start_period`。若日誌顯示 `backend` 一直 `unhealthy`，先看它的健康檢查記錄：`curl` 退出碼 7 是連接被拒（進程未監聽），22 是 HTTP 錯誤（`/health` 返回 5xx，通常是數據庫）。
+部署脚本只做三件事：`docker load` 加载 CI 构建好的镜像、`docker compose up --wait`、清理旧镜像。**服务器不再构建镜像**，所以 2 核 1G 的机器也能部署；镜像在 GitHub runner 上 build 后经 `docker save` 打包上传。
+
+首次启动 backend 要跑 EF 迁移和种子资料，慢机器上可能要好几分钟；`backend` 健康检查因此给了 180 秒 `start_period`，部署脚本等待上限 660 秒。若日志显示 `backend` 一直 `unhealthy`，先看它的健康检查记录：`curl` 退出码 7 是连接被拒（进程未监听），22 是 HTTP 错误（`/health` 返回 5xx，通常是数据库）。
+
+> **1G 内存机器必须配 swap。** 没有 swap 时 `docker load`/容器启停会在内核态长时间阻塞（`D` 状态），`load average` 飙到 20 也推不动。`deploy/bootstrap.sh` 会自动建 2G `/swapfile` 并写入 `/etc/fstab`；已初始化过的机器重新跑一遍 `sudo bash deploy/bootstrap.sh` 即可补上，不会重置密码或密钥。
 
 生产数据库、上传原图和日志分别保存在 `mc-erp-production_pgdata`、`mc-erp-production_storage`、`mc-erp-production_logs` 卷中，与本地开发数据隔离。更新或重启容器不会清空数据；禁止执行 `docker compose down -v`。备份必须覆盖数据库、原图及服务器 `.env`，迁移前先做备份。已有数据库的密码不能只通过修改 `.env` 更换，需要同步修改 PostgreSQL 角色密码。
 
