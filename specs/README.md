@@ -8,14 +8,16 @@
 
 | 文檔 | 作用 | 什麼時候讀 |
 |------|------|-----------|
+| [status.md](./status.md) | 決定"現在有什麼" — 已實現 / 未接線功能 | 動手前、懷疑功能是否存在時 |
 | [tech-stack.md](./tech-stack.md) | 決定"能寫什麼" — 語言、框架、庫版本、環境約束 | 引入新依賴、選技術方案前 |
 | [architecture.md](./architecture.md) | 決定"寫在哪" — 分層、模組邊界、依賴流向、物理結構 | 新建文件、加模組、跨模組調用前 |
+| [design-system.md](./design-system.md) | 決定"長什麼樣" — 視覺、組件、交互 | 寫前端頁面前 |
 
 ---
 
 ## 閱讀順序
 
-**通用編碼任務**：tech-stack.md → architecture.md → 開干
+**通用編碼任務**：status.md → tech-stack.md → architecture.md → 開干
 
 **架構決策**：architecture.md → 修改 → 如果重大變更記錄到 README 變更日誌
 

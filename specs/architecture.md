@@ -3,6 +3,8 @@
 > 決定"寫在哪"。分層、模組邊界、依賴流向、物理結構。
 >
 > 原則：**簡單分層，夠用就好。**
+>
+> 本文件描述目標設計；哪些已實現、哪些未接線見 [status.md](./status.md)。
 
 ---
 
@@ -33,7 +35,7 @@
 ├─────────────────────────────┤
 │    Application 層（Service）  │  ← 業務邏輯編排，調 Repository / 外部 API
 ├─────────────────────────────┤
-│   Infrastructure 層（實現）   │  ← EF Core Repository / HttpClient / Hangfire
+│   Infrastructure 層（實現）   │  ← EF Core Repository / HttpClient / 文件存儲
 └─────────────────────────────┘
 ```
 
@@ -52,8 +54,9 @@
 |------|------|---------|
 | **Identity** | 用戶、角色、權限、JWT 認證、密碼哈希 | User / Role / Permission / UserRole |
 | **Attendance** | 外部打卡數據拉取、工數統計、薪酬計算（MPF/OT）、月結報表 | AttendanceRecord / MonthlyWorkSummary / Worker |
-| **Accounting** | 收據拍照上傳、OCR 識別、支出按地盤分類、年度提取 | Receipt / ExpenseCategory / Site |
-| **Storage** | 雲盤文件管理、地盤照片存儲、按地盤/時間/事件分類、賬戶權限。文件存儲抽象為 `IFileStorage` 接口，MVP 階段用本地存儲實現，跑通後換對象存儲只需換實現 | FileItem / FilePermission / SitePhoto |
+| **Accounting** | 收據拍照上傳、OCR 識別、支出按地盤分類、年度提取 | Receipt（分類走 System 的 SysDict） |
+| **Storage** | 雲盤文件管理、地盤照片存儲、按地盤/時間/事件分類、賬戶權限。文件存儲抽象為 `IFileStorage` 接口，MVP 階段用本地存儲實現，跑通後換對象存儲只需換實現 | FileItem（FilePermission / SitePhoto 規劃中） |
+| **System** | 系統字典：分組 + 字典項（支出分類、票據類型、文件類別等可配置項） | SysDictGroup / SysDict |
 
 ### 模組間通信
 
@@ -74,31 +77,34 @@ backend/
 ├── appsettings.json            # 配置
 ├── Common/                     # 公共基礎設施
 │   ├── Domain/                 # 基類：Entity / AuditableEntity
-│   ├── Infrastructure/         # EF Core 基類 / Repository 基類 / Middleware
-│   ├── Security/               # JWT / 認證擴展 / 當前用戶上下文
-│   └── Exceptions/             # 統一異常處理
+│   ├── Infrastructure/Ocr/     # IOcrService / Azure 實現
+│   ├── Security/               # JWT / 密碼哈希 / 當前用戶上下文
+│   └── SeedData.cs             # 啟動時遷移 + 初始管理員
 ├── Features/                   # 業務模組
 │   ├── Identity/
-│   │   ├── Endpoints/         # 登錄 / 用戶 CRUD / 角色管理
+│   │   ├── Endpoints/          # 登錄 / 用戶 CRUD / 角色管理
 │   │   ├── Services/           # AuthService / UserService / RoleService
-│   │   ├── Entities/           # User / Role / Permission
-│   │   └── Repositories/       # IUserRepository
+│   │   ├── Entities/           # User / Role / Permission / UserRole / RolePermission
+│   │   └── Repositories/       # IUserRepository / IRoleRepository + 實現
 │   ├── Attendance/
-│   │   ├── Endpoints/          # 工數查詢 / 月結報表
-│   │   ├── Services/           # AttendanceSyncService / PayrollService
-│   │   ├── Entities/           # AttendanceRecord / MonthlyWorkSummary / Worker
-│   │   ├── Repositories/       # IAttendanceRepository
-│   │   └── External/           # 外部打卡 API 客戶端
+│   │   ├── Endpoints/          # 工數查詢 / 月結報表 / 打卡表 / mock
+│   │   ├── Services/           # AttendanceServices / AttendanceTableService / 外部 API
+│   │   ├── Entities/           # AttendanceRecord / MonthlyWorkSummary / Worker / Site
+│   │   └── Repositories/       # IAttendanceRepository + 實現
 │   ├── Accounting/
-│   │   ├── Endpoints/          # 收據上傳 / 支出查詢
-│   │   ├── Services/           # ReceiptService / OcrService
-│   │   ├── Entities/           # Receipt / ExpenseCategory
-│   │   └── Repositories/
-│   └── Storage/
-│       ├── Endpoints/          # 文件上傳下載 / 權限管理
-│       ├── Services/           # IFileStorage / LocalStorageProvider / FileService / SitePhotoService
-│       ├── Entities/           # FileItem / FilePermission / SitePhoto
-│       └── Repositories/
+│   │   ├── Endpoints/          # 收據上傳 / 識別 / 保存 / 匯出
+│   │   ├── Services/           # ReceiptService / AccountingFileProtectionService
+│   │   ├── Entities/           # Receipt
+│   │   └── Repositories/       # ReceiptRepository
+│   ├── Storage/
+│   │   ├── Endpoints/          # 文件上傳下載
+│   │   ├── Services/           # IFileStorage / LocalFileStorage / FileService
+│   │   └── Entities/           # FileItem
+│   └── System/
+│       ├── Endpoints/          # 字典分組 + 字典項 CRUD
+│       ├── Services/           # SysDictGroupService / SysDictService
+│       ├── Entities/           # SysDictGroup / SysDict
+│       └── Repositories/       # ISysDictGroupRepository / ISysDictRepository + 實現
 └── Data/
     └── ErpDbContext.cs         # 單一 DbContext，所有實體在這裡註冊
 
@@ -138,8 +144,8 @@ frontend/
 
 - RESTful 風格
 - 路由前綴：`/api/{module}`，如 `/api/attendance`、`/api/accounting`
-- 統一返回：`TypedResults` + ProblemDetails（RFC 9457）
-- 分頁：`page` + `pageSize` 參數，返回 `{ items, total, page, pageSize }`
+- 統一返回：`TypedResults` + ProblemDetails（RFC 9457）；業務異常直接 `throw`，由 `Common/Errors/ExceptionProblemFilter` 轉換
+- 分頁：`page` + `pageSize` 參數，統一返回 `Common/PagedResult<T>`（`{ items, total, page, pageSize }`）
 - 認證：Bearer JWT Token
 - 授權：基於角色的 Policy，`[Authorize(Policy = "...")]`
 
@@ -171,22 +177,22 @@ User ─┬─ UserRole ── Role ── RolePermission ── Permission
 ### 考勤打卡數據
 
 - 現階段按月提供員工薪酬表和打卡明細；管理員可編輯並保存，注意事項最多 255 字元。金額使用 `decimal(18,2)`，工數和小時使用 `decimal(8,2)`。
-- 真實打卡機未對接：開發環境管理員通過 `/api/attendance/mock?year=...&month=...` 手動初始化模擬數據，重複初始化不覆蓋已有月結和打卡修正；正式環境不開放初始化。
+- 真實打卡機未對接：管理員通過 `/api/attendance/mock?year=...&month=...` 手動初始化模擬數據（所有環境可用），重複初始化不覆蓋已有月結和打卡修正。
 - 打卡時間入庫使用 UTC，查詢月份及前端展示按香港時區（UTC+8）。薪酬樣例金額與打卡明細獨立，計薪規則確認前不自動計算，也不啟用定時同步。
 - 通過 `IHttpClientFactory` 調用外部考勤接口
-- Hangfire 定時任務拉取打卡數據
 - CancellationToken 在 Infrastructure 層統一處理
 - 拉取後存入 `attendance_records` 表，按月匯總計算薪酬
 
 ### OCR 識別（會計收據）
 
-- 原圖和票據草稿先保存，使用 Azure Document Intelligence `prebuilt-receipt` / `prebuilt-invoice` 識別，結果須人工確認。未識別的日期、金額及幣種保持空值。
+- 票據可直接手動錄入（不必先有原圖），原圖可稍後補上或更換。前端只有一個「保存」動作，保存後即完成，沒有草稿狀態；必填為實際地盤、票據類型、支出分類（不能是 pending）及導出地盤分類，日期、金額、幣種可留空。OCR 只在使用者按「OCR 識別」時執行，回傳建議欄位，由使用者決定是否填入（只填空白欄位），不直接改寫票據資料。
 - `IOcrService` 位於 Common/Infrastructure/Ocr，使用官方 C# SDK，憑據只在後端配置；收據中文識別須實測，不能保證準確率。
 - `Receipt.SiteId` 引用考勤地盤，表示實際支出歸屬；`SiteCategoryDictId` 引用 `AccountingSiteCategory` 字典，僅表示圖片提取分類，兩者獨立。
-- `DocumentTypeDictId` 引用 `AccountingDocumentType`（receipt / invoice）；圖片 `FileItem.Type` 引用 `Accounting` 支出分類，分類不在票據表重複保存。
+- `DocumentTypeDictId` 引用 `AccountingDocumentType`（receipt / invoice）。支出分類由 `Receipt.Type` 持有（`Accounting` 字典），沒有原圖也可保存；有原圖時同步寫入 `FileItem.Type`，供文件模組按分類展示。
 - 金額 decimal(18,2)，票據日期 DateOnly；發票金額取 InvoiceTotal，不取可能含歷史欠款的 AmountDue，也不自動視為已付款。
-- 僅 Admin 操作；會計圖片不能經通用 Storage 接口繞過權限或刪除。識別失敗保留原圖並可重試，識別不得覆寫已人工修改資料。
-- 按票據日期（含起止日）、票據類型、支出分類、導出地盤分類及可選實際地盤提取全部匹配原圖為 ZIP，不限當前頁，不輸出 CSV。MD5 僅作核對，不是文件地址或唯一鍵。
+- 有原圖後才可識別。使用 Azure Document Intelligence `prebuilt-receipt` / `prebuilt-invoice`；未識別的日期、金額及幣種保持空值。
+- 僅 Admin 操作；會計圖片不能經通用 Storage 接口繞過權限或刪除。票據可經會計接口刪除（原圖一併清理），刪除不可復原。識別失敗保留原圖並可重試，識別結果不會覆寫票據欄位。
+- 按票據日期（含起止日）、票據類型、支出分類、導出地盤分類及可選實際地盤提取全部匹配原圖為 ZIP，不限當前頁，不輸出 CSV；沒有原圖的票據不進 ZIP。MD5 僅作核對，不是文件地址或唯一鍵。
 - ZIP 使用臨時文件，預設上限 5000 張 / 250 MB 原圖，完成或失敗後清理；第一版單圖上限 4 MB，與 Azure F0 相容。
 
 ### 文件存儲

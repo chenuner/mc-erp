@@ -34,8 +34,12 @@ request.interceptors.response.use(
         try { error.response.data = JSON.parse(await error.response.data.text()) }
         catch { /* 非 JSON 響應沿用通用提示 */ }
       }
-      const detail = error.response?.data?.detail ?? error.response?.data
-      const msg = typeof detail === 'string' && detail ? detail : '請求失敗，請稍後再試'
+      const data = error.response?.data
+      const fieldErrors: string[] = data?.errors
+        ? Object.values(data.errors as Record<string, string[]>).flat()
+        : []
+      const detail = typeof data?.detail === 'string' ? data.detail : typeof data === 'string' ? data : ''
+      const msg = fieldErrors.length > 0 ? fieldErrors.join('；') : detail || '請求失敗，請稍後再試'
       ElMessage.error(msg)
     }
     return Promise.reject(error)

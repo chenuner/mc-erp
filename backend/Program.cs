@@ -18,14 +18,31 @@ using MC.Erp.Features.System.Endpoints;
 using MC.Erp.Features.System.Repositories;
 using MC.Erp.Features.System.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Hangfire;
-using Hangfire.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// 臨時目錄：上傳緩衝（超過 64KB 落盤）和票據打包都走 Path.GetTempPath()。
+// 本地 Windows 的 %TEMP% 可能寫不進去，用 Storage:TempPath 覆蓋；未配置則用系統默認（生產容器是 /tmp）
+var storageSettings = builder.Configuration.GetSection("Storage").Get<StorageOptions>() ?? new StorageOptions();
+if (!string.IsNullOrWhiteSpace(storageSettings.TempPath))
+{
+    var tempPath = storageSettings.TempPath;
+    try
+    {
+        Directory.CreateDirectory(tempPath);
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+    {
+        // 啟動時就報清楚，免得等到上傳才出現莫名其妙的 500
+        throw new InvalidOperationException($"臨時目錄不可用：{tempPath}（檢查 Storage:TempPath）", ex);
+    }
+    Environment.SetEnvironmentVariable("TMP", tempPath);
+    Environment.SetEnvironmentVariable("TEMP", tempPath);
+}
 
 // 日誌
 builder.Host.UseSerilog((ctx, cfg) => cfg
@@ -94,12 +111,9 @@ builder.Services.AddScoped<FileService>();
 
 // System 模塊
 builder.Services.AddScoped<ISysDictRepository, SysDictRepository>();
+builder.Services.AddScoped<ISysDictGroupRepository, SysDictGroupRepository>();
 builder.Services.AddScoped<SysDictService>();
-
-// Hangfire
-builder.Services.AddHangfire(config => config
-    .UsePostgreSqlStorage(o => o.UseNpgsqlConnection(builder.Configuration.GetConnectionString("Default"))));
-builder.Services.AddHangfireServer();
+builder.Services.AddScoped<SysDictGroupService>();
 
 // 健康檢查
 builder.Services.AddHealthChecks()
@@ -111,10 +125,15 @@ builder.Services.AddOpenApi();
 // 統一異常處理（ProblemDetails, RFC 9457）
 builder.Services.AddProblemDetails();
 
+// 輸入驗證：DataAnnotations 對所有 endpoint 自動生效，失敗回 400 ValidationProblem
+builder.Services.AddValidation();
+
 var app = builder.Build();
 
 // 異常處理
 app.UseExceptionHandler();
+// 無 body 的 4xx/5xx 也轉成 ProblemDetails
+app.UseStatusCodePages();
 
 // 認證 & 授權
 app.UseAuthentication();

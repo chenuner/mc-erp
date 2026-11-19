@@ -1,0 +1,67 @@
+@baseUrl = http://localhost:5209
+@token = REPLACE_WITH_LOCAL_ADMIN_TOKEN
+@groupId = REPLACE_WITH_GROUP_ID
+@dictId = REPLACE_WITH_DICT_ID
+
+### 分組列表（含字典項數量）
+GET {{baseUrl}}/api/system/dict-groups
+Authorization: Bearer {{token}}
+
+### 新增分組：識別碼由系統生成，管理端只需要名稱
+POST {{baseUrl}}/api/system/dict-groups
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "報銷類型",
+  "remark": "報銷單可選的類型"
+}
+
+### 修改分組名稱 / 說明
+PUT {{baseUrl}}/api/system/dict-groups/{{groupId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "報銷類型",
+  "remark": "更新後的說明"
+}
+
+### 新增字典項：不傳 value，後端自動編號 1、2、3…
+POST {{baseUrl}}/api/system/dicts
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "groupName": "REPLACE_WITH_GROUP_CODE",
+  "label": "交通",
+  "enabled": true
+}
+
+### 修改字典項：value 只在非系統分組允許修改
+PUT {{baseUrl}}/api/system/dicts/{{dictId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "label": "交通費",
+  "enabled": false
+}
+
+### 調整字典項排序：ids 必須是該分組的完整順序
+PUT {{baseUrl}}/api/system/dicts/reorder
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "groupName": "REPLACE_WITH_GROUP_CODE",
+  "ids": ["REPLACE_WITH_DICT_ID_1", "REPLACE_WITH_DICT_ID_2"]
+}
+
+### 刪除字典項（被票據引用時回 409，請改用停用）
+DELETE {{baseUrl}}/api/system/dicts/{{dictId}}
+Authorization: Bearer {{token}}
+
+### 刪除分組（僅允許空分組）
+DELETE {{baseUrl}}/api/system/dict-groups/{{groupId}}
+Authorization: Bearer {{token}}

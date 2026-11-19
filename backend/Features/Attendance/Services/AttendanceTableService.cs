@@ -79,7 +79,7 @@ public sealed class AttendanceTableService(ErpDbContext db, IExternalAttendanceA
                 DailyWage = worker.DailyWage, OvertimeAmount = 1200m,
                 MpfEmployer = 1200m, MpfEmployee = 1200m,
                 ActualPay = 22500m + index * 100m, TotalAmount = 24900m + index * 100m,
-                Remark = "模擬薪酬，金額為樣例值，待確認計薪規則"
+                Remark = "模擬薪酬，金額為樣例值，計薪規則待定"
             });
             added++;
         }

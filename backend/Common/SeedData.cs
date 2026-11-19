@@ -16,6 +16,37 @@ public static class SeedData
 
         await db.Database.MigrateAsync();
 
+        // 分組：先確保程式內建分組存在，再把歷史資料中出現的分組補齊
+        var systemGroups = new (string Code, string Name, int Sort)[]
+        {
+            ("Accounting", "支出分類", 0),
+            ("AccountingDocumentType", "票據類型", 1),
+            ("AccountingSiteCategory", "導出地盤分類", 2)
+        };
+        var existingGroups = await db.SysDictGroups.ToListAsync();
+        foreach (var (code, name, sort) in systemGroups)
+        {
+            var group = existingGroups.FirstOrDefault(item => item.Code == code);
+            if (group is null)
+            {
+                db.SysDictGroups.Add(new SysDictGroup { Code = code, Name = name, Sort = sort, IsSystem = true });
+                continue;
+            }
+
+            if (group.IsSystem) continue;
+            group.IsSystem = true;
+            if (group.Name == code) group.Name = name;
+            group.Sort = sort;
+        }
+        await db.SaveChangesAsync();
+
+        var knownGroupCodes = (await db.SysDictGroups.Select(item => item.Code).ToListAsync()).ToHashSet();
+        var dictGroupCodes = await db.SysDicts
+            .Select(dict => dict.GroupName).Distinct().ToListAsync();
+        foreach (var code in dictGroupCodes.Where(code => !knownGroupCodes.Contains(code)))
+            db.SysDictGroups.Add(new SysDictGroup { Code = code, Name = code, Sort = 50 });
+        await db.SaveChangesAsync();
+
         var accountingDicts = new (string Group, string Value, string Label)[]
         {
             ("AccountingDocumentType", "receipt", "收據"),

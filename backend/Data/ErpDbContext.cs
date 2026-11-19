@@ -24,6 +24,7 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
 
     // System（系統級字典及其他系統配置）
     public DbSet<SysDict> SysDicts => Set<SysDict>();
+    public DbSet<SysDictGroup> SysDictGroups => Set<SysDictGroup>();
 
     // Storage
     public DbSet<FileItem> FileItems => Set<FileItem>();
@@ -45,11 +46,14 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
             entity.Property(receipt => receipt.Version).IsConcurrencyToken();
             entity.HasIndex(receipt => receipt.FileItemId).IsUnique();
             entity.HasIndex(receipt => receipt.ReceiptDate);
+            entity.HasIndex(receipt => receipt.Type);
             entity.HasIndex(receipt => new { receipt.SiteId, receipt.ReceiptDate });
             entity.HasIndex(receipt => new { receipt.SiteCategoryDictId, receipt.ReceiptDate });
-            entity.HasOne(receipt => receipt.FileItem).WithOne().HasForeignKey<Receipt>(receipt => receipt.FileItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(receipt => receipt.FileItem).WithOne().HasForeignKey<Receipt>(receipt => receipt.FileItemId)
+                .IsRequired(false).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(receipt => receipt.Site).WithMany().HasForeignKey(receipt => receipt.SiteId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(receipt => receipt.DocumentTypeDict).WithMany().HasForeignKey(receipt => receipt.DocumentTypeDictId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(receipt => receipt.TypeDict).WithMany().HasForeignKey(receipt => receipt.Type).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(receipt => receipt.SiteCategoryDict).WithMany().HasForeignKey(receipt => receipt.SiteCategoryDictId).OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -145,6 +149,19 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
             e.Property(s => s.TotalAmount).HasPrecision(18, 2);
             e.Property(s => s.Remark).HasMaxLength(255);
             e.HasIndex(s => new { s.WorkerId, s.Year, s.Month }).IsUnique();
+        });
+
+        // System 模塊：字典分組
+        modelBuilder.Entity<SysDictGroup>(e =>
+        {
+            e.ToTable("sys_dict_group");
+            e.HasKey(g => g.Id);
+            e.Property(g => g.Code).HasMaxLength(50).IsRequired();
+            e.Property(g => g.Name).HasMaxLength(100).IsRequired();
+            e.Property(g => g.Sort).HasDefaultValue(0);
+            e.Property(g => g.Remark).HasMaxLength(255);
+            e.HasIndex(g => g.Code).IsUnique().HasFilter("\"IsDeleted\" = false");
+            e.HasQueryFilter(g => !g.IsDeleted);
         });
 
         // System 模塊：系統字典

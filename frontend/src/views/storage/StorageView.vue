@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, type UploadFile, type UploadFiles, type UploadRequestOptions } from 'element-plus'
 import AppIcon from '@/components/AppIcon.vue'
-import { listSysDicts, type SysDictDto } from '@/api/system'
+import { listSysDictGroups, listSysDicts, type SysDictDto, type SysDictGroupDto } from '@/api/system'
 import {
   deleteFile,
   downloadFile,
@@ -16,6 +16,7 @@ type ViewMode = 'list' | 'grid'
 
 const dictLoading = ref(false)
 const dicts = ref<SysDictDto[]>([])
+const dictGroups = ref<SysDictGroupDto[]>([])
 const filterType = ref('')
 const enabledDicts = computed(() => dicts.value.filter((dict) => dict.enabled))
 
@@ -32,6 +33,7 @@ async function fetchDicts() {
       if (result.items.length === 0) break
     } while (items.length < total)
     dicts.value = items
+    dictGroups.value = await listSysDictGroups()
   } catch {
     /* 攔截器已提示 */
   } finally {
@@ -55,7 +57,8 @@ function formatDate(iso: string): string {
 }
 
 function dictLabel(dict: SysDictDto): string {
-  return `${dict.groupName} / ${dict.label}`
+  const groupName = dictGroups.value.find((group) => group.code === dict.groupName)?.name ?? dict.groupName
+  return `${groupName} / ${dict.label}`
 }
 
 interface FileTypeInfo {

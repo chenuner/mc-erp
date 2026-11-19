@@ -32,12 +32,6 @@ namespace MC.Erp.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
-                    b.Property<DateTime?>("ConfirmedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("ConfirmedById")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -51,20 +45,14 @@ namespace MC.Erp.Migrations
                     b.Property<Guid>("DocumentTypeDictId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("FileItemId")
+                    b.Property<Guid?>("FileItemId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("InvoiceNumber")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
-                    b.Property<bool>("IsConfirmed")
-                        .HasColumnType("boolean");
-
                     b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("ManuallyEdited")
                         .HasColumnType("boolean");
 
                     b.Property<string>("MerchantName")
@@ -102,6 +90,9 @@ namespace MC.Erp.Migrations
                     b.Property<Guid>("SiteId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid>("Type")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -117,6 +108,8 @@ namespace MC.Erp.Migrations
                         .IsUnique();
 
                     b.HasIndex("ReceiptDate");
+
+                    b.HasIndex("Type");
 
                     b.HasIndex("SiteCategoryDictId", "ReceiptDate");
 
@@ -557,6 +550,55 @@ namespace MC.Erp.Migrations
                     b.ToTable("sys_dict", (string)null);
                 });
 
+            modelBuilder.Entity("MC.Erp.Features.System.Entities.SysDictGroup", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsSystem")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Remark")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<int>("Sort")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasFilter("\"IsDeleted\" = false");
+
+                    b.ToTable("sys_dict_group", (string)null);
+                });
+
             modelBuilder.Entity("MC.Erp.Features.Accounting.Entities.Receipt", b =>
                 {
                     b.HasOne("MC.Erp.Features.System.Entities.SysDict", "DocumentTypeDict")
@@ -568,8 +610,7 @@ namespace MC.Erp.Migrations
                     b.HasOne("MC.Erp.Features.Storage.Entities.FileItem", "FileItem")
                         .WithOne()
                         .HasForeignKey("MC.Erp.Features.Accounting.Entities.Receipt", "FileItemId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("MC.Erp.Features.System.Entities.SysDict", "SiteCategoryDict")
                         .WithMany()
@@ -582,6 +623,12 @@ namespace MC.Erp.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MC.Erp.Features.System.Entities.SysDict", "TypeDict")
+                        .WithMany()
+                        .HasForeignKey("Type")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("DocumentTypeDict");
 
                     b.Navigation("FileItem");
@@ -589,6 +636,8 @@ namespace MC.Erp.Migrations
                     b.Navigation("Site");
 
                     b.Navigation("SiteCategoryDict");
+
+                    b.Navigation("TypeDict");
                 });
 
             modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.AttendanceRecord", b =>

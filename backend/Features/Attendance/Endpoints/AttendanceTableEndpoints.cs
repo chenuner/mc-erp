@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using MC.Erp.Common;
 using MC.Erp.Features.Attendance.Entities;
 using MC.Erp.Features.Attendance.Services;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -19,20 +20,20 @@ public static class AttendanceTableEndpoints
     private static bool ValidQuery(int year, int month, int page, int pageSize)
         => year is >= 2000 and <= 2099 && month is >= 1 and <= 12 && page is >= 1 and <= 100000 && pageSize is >= 1 and <= 100;
 
-    private static async Task<Results<Ok<AttendancePage<PayrollDto>>, ValidationProblem>> GetPayrollAsync(
+    private static async Task<Results<Ok<PagedResult<PayrollDto>>, ValidationProblem>> GetPayrollAsync(
         int year, int month, AttendanceTableService svc, CancellationToken ct, string? name = null, int page = 1, int pageSize = 20)
     {
         if (!ValidQuery(year, month, page, pageSize)) return InvalidQuery();
         var result = await svc.GetPayrollAsync(year, month, name, page, pageSize, ct);
-        return TypedResults.Ok(new AttendancePage<PayrollDto>(result.Items.Select(PayrollDto.From).ToList(), result.Total, page, pageSize));
+        return TypedResults.Ok(new PagedResult<PayrollDto>(result.Items.Select(PayrollDto.From).ToList(), result.Total, page, pageSize));
     }
 
-    private static async Task<Results<Ok<AttendancePage<PunchDto>>, ValidationProblem>> GetPunchesAsync(
+    private static async Task<Results<Ok<PagedResult<PunchDto>>, ValidationProblem>> GetPunchesAsync(
         int year, int month, AttendanceTableService svc, CancellationToken ct, string? name = null, int page = 1, int pageSize = 20)
     {
         if (!ValidQuery(year, month, page, pageSize)) return InvalidQuery();
         var result = await svc.GetPunchesAsync(year, month, name, page, pageSize, ct);
-        return TypedResults.Ok(new AttendancePage<PunchDto>(result.Items.Select(PunchDto.From).ToList(), result.Total, page, pageSize));
+        return TypedResults.Ok(new PagedResult<PunchDto>(result.Items.Select(PunchDto.From).ToList(), result.Total, page, pageSize));
     }
 
     private static ValidationProblem InvalidQuery() => TypedResults.ValidationProblem(new Dictionary<string, string[]>
@@ -40,10 +41,10 @@ public static class AttendanceTableEndpoints
         ["query"] = ["年份須為 2000 至 2099，月份須為 1 至 12，頁碼須為 1 至 100000，每頁須為 1 至 100。"]
     });
 
-    private static ValidationProblem? Validate(object request)
+    // DataAnnotations（[Range] / [MaxLength]）已由全域 AddValidation 驗證；這裡只補「最多兩位小數」規則。
+    private static ValidationProblem? ValidateDecimals(object request)
     {
         var errors = new List<ValidationResult>();
-        Validator.TryValidateObject(request, new ValidationContext(request), errors, true);
         foreach (var property in request.GetType().GetProperties())
         {
             if (property.GetValue(request) is decimal value && decimal.Round(value, 2) != value)
@@ -58,7 +59,7 @@ public static class AttendanceTableEndpoints
     private static async Task<Results<Ok<PayrollDto>, NotFound, ValidationProblem>> UpdatePayrollAsync(
         Guid id, UpdatePayrollRequest request, AttendanceTableService svc, CancellationToken ct)
     {
-        if (Validate(request) is { } invalid) return invalid;
+        if (ValidateDecimals(request) is { } invalid) return invalid;
         var row = await svc.GetPayrollByIdAsync(id, ct);
         if (row is null) return TypedResults.NotFound();
         row.WorkDays = request.WorkDays;
@@ -79,7 +80,7 @@ public static class AttendanceTableEndpoints
     private static async Task<Results<Ok<PunchDto>, NotFound, ValidationProblem>> UpdatePunchAsync(
         Guid id, UpdatePunchRequest request, AttendanceTableService svc, CancellationToken ct)
     {
-        if (Validate(request) is { } invalid) return invalid;
+        if (ValidateDecimals(request) is { } invalid) return invalid;
         if (request.ClockInTime.ToOffset(TimeSpan.FromHours(8)).Year is < 2000 or > 2099)
             return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["clockInTime"] = ["打卡年份須為 2000 至 2099。"] });
         if (request.ClockOutTime is { } end && end <= request.ClockInTime)
@@ -112,9 +113,6 @@ public static class AttendanceTableEndpoints
         }
     }
 }
-
-/// <summary>考勤表格分頁結果。</summary>
-public sealed record AttendancePage<T>(List<T> Items, int Total, int Page, int PageSize);
 
 /// <summary>員工薪酬表，金額單位為港元。</summary>
 public sealed record PayrollDto(Guid Id, Guid WorkerId, string Name, string? EmployeeId, int Year, int Month,

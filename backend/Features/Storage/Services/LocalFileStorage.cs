@@ -9,6 +9,7 @@ namespace MC.Erp.Features.Storage.Services;
 /// </summary>
 public sealed class LocalFileStorage(IOptions<StorageOptions> options) : IFileStorage
 {
+    // Storage:RootPath 相對進程工作目錄解析：本地 dotnet run = backend\storage-files；生產容器 = /app/storage-files（volume 掛載）
     private string RootPath => Path.GetFullPath(options.Value.RootPath);
 
     public async Task<(string StoredName, string Md5)> SaveAsync(Stream content, string originalName, CancellationToken ct)

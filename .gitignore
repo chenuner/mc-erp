@@ -10,6 +10,10 @@
 logs/
 *.log
 
+# 本地臨時目錄（大型上傳的緩衝文件）
+.tmp/
+mc-erp-temp/
+
 # Uploaded files
 /backend/storage-files/
 

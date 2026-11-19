@@ -3,6 +3,8 @@
 > 決定"能寫什麼"。任何不在此文件中的依賴 / 框架 / 工具，默認不能用。
 >
 > 原則：**夠用就好，不過度工程化。**
+>
+> 下表記錄選型與狀態；實際版本以 [backend/MC.Erp.csproj](../backend/MC.Erp.csproj) 及 [frontend/package.json](../frontend/package.json) 為準，避免兩處不同步。
 
 ---
 
@@ -22,8 +24,7 @@
 |------|------|------|------|
 | Entity Framework Core | 10.x | ✅ 已採納 | ORM，Code First |
 | Npgsql.EntityFrameworkCore.PostgreSQL | 10.x | ✅ 已採納 | PostgreSQL 提供程序 |
-| Scrutor | 7.0.0 | ✅ 已採納 | 程序集掃描註冊 |
-| .NET 置 DataAnnotations | - | ✅ 已採納 | 參數校驗，不用 FluentValidation |
+| .NET 內置 DataAnnotations | - | ✅ 已採納 | 參數校驗，不用 FluentValidation |
 
 ### 數據庫 & 緩存
 
@@ -37,14 +38,7 @@
 | 技術 | 版本 | 狀態 | 說明 |
 |------|------|------|------|
 | JWT Bearer | 10.x | ✅ 已採納 | 身份認證 |
-| Isopoh.Cryptography.Argon2 | 1.4.x | ✅ 已採納 | 密碼哈希（Argon2id） |
-
-### 後台任務
-
-| 技術 | 版本 | 狀態 | 說明 |
-|------|------|------|------|
-| Hangfire | 1.8.x | ✅ 已採納 | 定時拉取外部考勤打卡數據 |
-| Hangfire.PostgreSql | 1.20.x | ✅ 已採納 | PostgreSQL 存储 |
+| Isopoh.Cryptography.Argon2 | 2.0.x | ✅ 已採納 | 密碼哈希（Argon2id） |
 
 ### 外部集成
 
@@ -66,9 +60,9 @@
 
 | 技術 | 版本 | 狀態 | 說明 |
 |------|------|------|------|
-| Scalar.AspNetCore | 2.10.x | ✅ 已採納 | API 文檔 UI |
+| Scalar.AspNetCore | 2.1.x | ✅ 已採納 | API 文檔 UI |
 | Microsoft.AspNetCore.OpenApi | 10.x | ✅ 已採納 | OpenAPI 生成 |
-| AspNetCore.HealthChecks.NpgSql | 8.0.x | ✅ 已採納 | DB 健康檢查 |
+| AspNetCore.HealthChecks.NpgSql | 9.0.x | ✅ 已採納 | DB 健康檢查 |
 
 ### 禁止引入
 

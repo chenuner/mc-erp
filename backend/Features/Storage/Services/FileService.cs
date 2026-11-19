@@ -11,6 +11,11 @@ namespace MC.Erp.Features.Storage.Services;
 /// <summary>
 /// 文件服務：上傳 / 列表 / 下載 / 刪除
 /// </summary>
+/// <remarks>
+/// 落盤名是隨機 GUID + 原擴展名，原名只存在資料庫 storage_files.OriginalName：
+/// 本地開發：D:\DevCode\mc-erp\backend\storage-files\xxxx.png（Storage:RootPath 相對工作目錄 backend）
+/// 生產環境：容器內 /app/storage-files/xxxx.png（docker volume storage 掛載，重建容器不丟文件）
+/// </remarks>
 public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentUser user, SysDictService dictService,
     AccountingFileProtectionService accounting, IHttpContextAccessor context)
 {
