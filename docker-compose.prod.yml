@@ -1,9 +1,17 @@
 name: mc-erp-production
 
+# 容器日志硬上限：崩溃循环或刷日志也不会把磁盘写满
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_DB: mc_erp
       POSTGRES_USER: mc_erp
@@ -15,12 +23,14 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
-      start_period: 20s
+      start_period: 10s
 
   backend:
-    # 镜像由 GitHub Actions 构建后 docker save 上传，服务器只 docker load，不在这里 build
+    # 镜像由 GitHub Actions 在 runner 上 build，服务器只 docker load；禁止从这里 pull
     image: mc-erp-backend:latest
+    pull_policy: never
     restart: unless-stopped
+    logging: *default-logging
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_HTTP_PORTS: '8080'
@@ -38,17 +48,19 @@ services:
         condition: service_healthy
     healthcheck:
       # 用 127.0.0.1 而不是 localhost：容器內 localhost 可能先解析到 ::1。
-      # 首次啟動要跑 EF 遷移和種子資料，慢機器上可能超過 3 分鐘，所以預算放寬到 8 分鐘。
+      # 首次啟動要跑 EF 遷移和種子資料，慢機器上可能超過 3 分鐘，因此預算放寬到 5 分鐘。
       test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "8", "http://127.0.0.1:8080/health"]
       interval: 10s
       timeout: 10s
-      retries: 30
-      start_period: 180s
+      retries: 24
+      start_period: 60s
 
   web:
-    # 同上：镜像由 CI 构建并上传
+    # 同上：镜像由 CI build 并 docker save 上传，服务器只 docker load
     image: mc-erp-web:latest
+    pull_policy: never
     restart: unless-stopped
+    logging: *default-logging
     ports:
       # 只綁本機回環，由宿主機 nginx 統一對外；不佔用 80/443
       - '127.0.0.1:8080:80'
@@ -58,7 +70,7 @@ services:
     healthcheck:
       # 容器內 nginx 監聽 80；8080 只是宿主機的映射端口，不要在容器內用 8080。
       test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1/health"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
       retries: 12
       start_period: 20s

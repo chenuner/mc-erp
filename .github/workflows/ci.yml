@@ -81,12 +81,12 @@ jobs:
           retention-days: 7
 
   images:
-    name: Build Images
+    name: Build and Save Images
     needs: [backend, frontend]
     # 镜像只在要部署时才需要，PR 只验证代码能编译
     if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -103,37 +103,42 @@ jobs:
           name: frontend
           path: images/frontend/dist
 
-      # 在 runner 上构建，服务器只负责 docker load；2 核小机器不再需要编译
+      # 在 runner 上构建：2 核服务器不再 build / 拉基础镜像，只负责 docker load
       - name: Build backend image
+        timeout-minutes: 8
         run: |
           cp backend/Dockerfile images/backend/
           docker build --tag mc-erp-backend:latest images/backend
 
       - name: Build frontend image
+        timeout-minutes: 5
         run: |
           cp frontend/Dockerfile frontend/nginx.conf images/frontend/
           docker build --tag mc-erp-web:latest images/frontend
 
+      # 两个镜像打成一个 gzip 包：服务器只需一次 scp、一次 load
       - name: Save images
+        timeout-minutes: 8
         run: |
-          docker save mc-erp-backend:latest > mc-erp-backend.tar
-          docker save mc-erp-web:latest > mc-erp-web.tar
-          ls -lh mc-erp-*.tar
+          set -euo pipefail
+          docker save mc-erp-backend:latest mc-erp-web:latest | gzip -1 > mc-erp-images.tar.gz
+          ls -lh mc-erp-images.tar.gz
 
       - name: Upload images
         uses: actions/upload-artifact@v6
         with:
           name: images
-          path: mc-erp-*.tar
+          path: mc-erp-images.tar.gz
           if-no-files-found: error
           retention-days: 1
 
   deploy:
     name: Deploy Production
-    # 需要镜像 job：服务器不自己 build，只 docker load CI 产出的镜像
-    needs: [backend, frontend, images]
+    # 镜像 job 已包含 backend / frontend 的构建，这里只等镜像
+    needs: [images]
     if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
+    # 外层安全网，不是预期耗时：远端脚本自己会在约 16 分钟内收尾（SSH 硬断）。
     timeout-minutes: 30
     concurrency:
       group: production-deployment
@@ -146,47 +151,64 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Download backend
-        uses: actions/download-artifact@v7
-        with:
-          name: backend
-          path: release/backend/publish
-
-      - name: Download frontend
-        uses: actions/download-artifact@v7
-        with:
-          name: frontend
-          path: release/frontend/dist
-
       - name: Download images
         uses: actions/download-artifact@v7
         with:
           name: images
-          path: release/images
+          path: deploy-images
 
       - name: Package release
         run: |
+          mkdir -p release
           cp docker-compose.prod.yml release/
           bash -n deploy/bootstrap.sh
           bash -n deploy/deploy.sh
           tar -czf release.tar.gz -C release .
 
-      - name: Upload and start services
+      # 密钥文件保留到 job 结束，失败时兜底清理步骤还要用它登录
+      - name: Prepare SSH key
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          : "${DEPLOY_HOST:?Set repository variable DEPLOY_HOST}"
           : "${DEPLOY_SSH_KEY:?Set repository secret DEPLOY_SSH_KEY}"
           : "${DEPLOY_KNOWN_HOSTS:?Set repository secret DEPLOY_KNOWN_HOSTS}"
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/deploy_key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy_known_hosts"
+
+      - name: Upload and start services
+        id: deploy
+        # 必须小于 job 超时，才能给下面的兜底清理留出执行机会
+        timeout-minutes: 18
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?Set repository variable DEPLOY_HOST}"
           key="$RUNNER_TEMP/deploy_key"
           hosts="$RUNNER_TEMP/deploy_known_hosts"
-          trap 'rm -f "$key" "$hosts"' EXIT
-          umask 077
-          printf '%s\n' "$DEPLOY_SSH_KEY" > "$key"
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$hosts"
-          options=(-i "$key" -o "UserKnownHostsFile=$hosts" -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=20)
-          scp "${options[@]}" -P "$DEPLOY_PORT" release.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/opt/mc-erp/release.tar.gz"
-          scp "${options[@]}" -P "$DEPLOY_PORT" release/images/mc-erp-backend.tar release/images/mc-erp-web.tar "$DEPLOY_USER@$DEPLOY_HOST:/opt/mc-erp/"
-          ssh "${options[@]}" -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "bash -s" < deploy/deploy.sh
+          options=(-i "$key" -o "UserKnownHostsFile=$hosts" -o StrictHostKeyChecking=yes -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+          # scp / ssh 本身也有硬逾时：网络黑洞或远端不响应时 runner 不会无限等待
+          timeout --kill-after=15s 120s scp "${options[@]}" -P "$DEPLOY_PORT" release.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/opt/mc-erp/release.tar.gz"
+          timeout --kill-after=15s 600s scp "${options[@]}" -P "$DEPLOY_PORT" deploy-images/mc-erp-images.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/opt/mc-erp/mc-erp-images.tar.gz"
+          timeout --kill-after=30s 960s ssh "${options[@]}" -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- deploy" < deploy/deploy.sh
+
+      # 部署步骤失败/超时后，远端可能还留着卡住的 compose 进程和临时镜像包；
+      # cleanup 模式只杀进程、清缓存、删临时文件，不会停止正在运行的服务。
+      - name: Cleanup remote after failure
+        if: always() && (steps.deploy.outcome == 'failure' || steps.deploy.outcome == 'cancelled')
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/deploy_key"
+          hosts="$RUNNER_TEMP/deploy_known_hosts"
+          if [[ ! -f "$key" || -z "${DEPLOY_HOST:-}" ]]; then
+            echo "No SSH key or DEPLOY_HOST, skipping remote cleanup."
+            exit 0
+          fi
+          options=(-i "$key" -o "UserKnownHostsFile=$hosts" -o StrictHostKeyChecking=yes -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+          timeout --kill-after=15s 240s ssh "${options[@]}" -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- cleanup" < deploy/deploy.sh || true
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/deploy_key" "$RUNNER_TEMP/deploy_known_hosts"

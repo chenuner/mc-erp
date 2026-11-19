@@ -159,7 +159,7 @@ dotnet run --project tests/Accounting.Checks/Accounting.Checks.csproj -c Release
 
 - 後端：使用 .NET 10 進行 Release 構建，上傳發布產物。
 - 前端：使用 Node.js 24、pnpm（版本見 `package.json` 的 `packageManager`），按鎖文件安裝依賴，執行 Vite 生產構建。
-- 在默認分支手動觸發且建置成功後，透過 SSH 部署至 Ubuntu 24.04，啟動前端、後端及獨立的正式 PostgreSQL；PR 不部署。
+- 在默認分支手動觸發且建置成功後，GitHub runner 構建前後端鏡像並 `docker save`，透過 SSH 上傳後由伺服器 `docker load` 再啟動前端、後端及獨立的正式 PostgreSQL；PR 不部署。
 
 本地驗證以 `scripts/check.ps1` 為準（建置 + Identity / Accounting Checks + 前端型別與建置）。首次伺服器初始化命令、GitHub Secrets / Variables 清單及登入方法見 [deploy/README.md](deploy/README.md)。
 
