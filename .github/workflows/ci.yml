@@ -55,6 +55,9 @@ jobs:
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v5
+        with:
+          # package.json 在 frontend/ 下；action 默認只讀倉庫根目錄
+          package_json_file: frontend/package.json
 
       - name: Set up Node.js
         uses: actions/setup-node@v5
