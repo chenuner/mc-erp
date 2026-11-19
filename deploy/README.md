@@ -141,7 +141,17 @@ docker compose --env-file ../.env -f docker-compose.prod.yml ps
 docker compose --env-file ../.env -f docker-compose.prod.yml logs --tail 100
 ```
 
-以上命令使用 `deploy` 用户或 root 执行。健康检查失败时 Actions 会报告失败并输出容器日志；不会自动回滚数据库迁移。发布可能有短暂停机。
+以上命令使用 `deploy` 用户或 root 执行。健康检查失败时 Actions 会报告失败，并按 `postgres` / `backend` / `web` 分别输出容器状态、健康检查记录和日志；不会自动回滚数据库迁移。发布可能有短暂停机。
+
+排查端口不要搞混：
+
+| 从哪检查 | 地址 | 说明 |
+|---|---|---|
+| 容器内 web 健康检查 | `http://127.0.0.1/health` | 容器内 nginx 监听 80 |
+| 宿主機（SSH 登入後） | `http://127.0.0.1:8080/health` | compose 把 web 映射到宿主機回環 8080 |
+| 公網 | `http://伺服器公網IP/health` | 宿主機 nginx 轉發到 8080 |
+
+部署脚本先 `docker compose build`，再 `up --wait`，健康等待上限 660 秒。首次啟動 backend 要跑 EF 遷移和種子資料，慢機器上可能要好幾分鐘；`backend` 健康檢查因此給了 180 秒 `start_period`。若日誌顯示 `backend` 一直 `unhealthy`，先看它的健康檢查記錄：`curl` 退出碼 7 是連接被拒（進程未監聽），22 是 HTTP 錯誤（`/health` 返回 5xx，通常是數據庫）。
 
 生产数据库、上传原图和日志分别保存在 `mc-erp-production_pgdata`、`mc-erp-production_storage`、`mc-erp-production_logs` 卷中，与本地开发数据隔离。更新或重启容器不会清空数据；禁止执行 `docker compose down -v`。备份必须覆盖数据库、原图及服务器 `.env`，迁移前先做备份。已有数据库的密码不能只通过修改 `.env` 更换，需要同步修改 PostgreSQL 角色密码。
 
