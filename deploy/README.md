@@ -109,7 +109,13 @@ printf '%s ' '你的服务器公网IP'; sudo cut -d ' ' -f 1,2 /etc/ssh/ssh_host
 
 ## 4. 部署和登录
 
-GitHub → Actions → CI → Run workflow，选择仓库默认分支。需要重跑时重新运行整个工作流（推送提交不会自动触发 CI），以便重新生成构建产物。PR 不会部署。
+> **CICD触发方式**：CI 只监听 `pull_request` 和手动 `workflow_dispatch`。**推送到 `master` 不会自动执行**，不点 Run workflow 就不会部署。
+>
+> - 为了节省资源想要部署必须新建一次 run；在旧 run 上点 Re-run 不会改变分支。
+> - 分支下拉选 `master`。选 `dev` 等其他分支时 `Deploy Production` 显示灰色 `Skipped`，只建置不部署。
+> - 想改成推送即部署：在 `.github/workflows/ci.yml` 的 `on:` 下加 `push:` / `branches: [master]`，代价是每次推 master 都直接改生产。
+
+GitHub → Actions → CI → Run workflow，选择 `master`。需要重跑时重新运行整个工作流，以便重新生成构建产物。PR 不会部署。
 
 等待 Backend Build and Package、Frontend Build and Package、Deploy Production 全部通过，再打开 `http://服务器公网IP`（前提是已套用 1.1 的 `nginx.conf`）。
 
@@ -135,7 +141,17 @@ docker compose --env-file ../.env -f docker-compose.prod.yml ps
 docker compose --env-file ../.env -f docker-compose.prod.yml logs --tail 100
 ```
 
-以上命令使用 `deploy` 用户或 root 执行。健康检查失败时 Actions 会报告失败并输出容器日志；不会自动回滚数据库迁移。发布可能有短暂停机。
+以上命令使用 `deploy` 用户或 root 执行。健康检查失败时 Actions 会报告失败，并按 `postgres` / `backend` / `web` 分别输出容器状态、健康检查记录和日志；不会自动回滚数据库迁移。发布可能有短暂停机。
+
+排查端口不要搞混：
+
+| 从哪检查 | 地址 | 说明 |
+|---|---|---|
+| 容器内 web 健康检查 | `http://127.0.0.1/health` | 容器内 nginx 监听 80 |
+| 宿主機（SSH 登入後） | `http://127.0.0.1:8080/health` | compose 把 web 映射到宿主機回環 8080 |
+| 公網 | `http://伺服器公網IP/health` | 宿主機 nginx 轉發到 8080 |
+
+部署脚本先 `docker compose build`，再 `up --wait`，健康等待上限 660 秒。首次啟動 backend 要跑 EF 遷移和種子資料，慢機器上可能要好幾分鐘；`backend` 健康檢查因此給了 180 秒 `start_period`。若日誌顯示 `backend` 一直 `unhealthy`，先看它的健康檢查記錄：`curl` 退出碼 7 是連接被拒（進程未監聽），22 是 HTTP 錯誤（`/health` 返回 5xx，通常是數據庫）。
 
 生产数据库、上传原图和日志分别保存在 `mc-erp-production_pgdata`、`mc-erp-production_storage`、`mc-erp-production_logs` 卷中，与本地开发数据隔离。更新或重启容器不会清空数据；禁止执行 `docker compose down -v`。备份必须覆盖数据库、原图及服务器 `.env`，迁移前先做备份。已有数据库的密码不能只通过修改 `.env` 更换，需要同步修改 PostgreSQL 角色密码。
 
