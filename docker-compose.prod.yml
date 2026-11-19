@@ -15,7 +15,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
-      start_period: 20s
 
   backend:
     image: mc-erp-backend:latest
@@ -37,13 +36,11 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # 用 127.0.0.1 而不是 localhost：容器內 localhost 可能先解析到 ::1。
-      # 首次啟動要跑 EF 遷移和種子資料，慢機器上可能超過 3 分鐘，所以預算放寬到 8 分鐘。
-      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "8", "http://127.0.0.1:8080/health"]
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
       interval: 10s
-      timeout: 10s
-      retries: 30
-      start_period: 180s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
 
   web:
     image: mc-erp-web:latest
@@ -56,12 +53,10 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      # 容器內 nginx 監聽 80；8080 只是宿主機的映射端口，不要在容器內用 8080。
       test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1/health"]
       interval: 10s
       timeout: 5s
-      retries: 12
-      start_period: 20s
+      retries: 6
 
 volumes:
   pgdata:
