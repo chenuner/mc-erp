@@ -109,7 +109,13 @@ printf '%s ' '你的服务器公网IP'; sudo cut -d ' ' -f 1,2 /etc/ssh/ssh_host
 
 ## 4. 部署和登录
 
-GitHub → Actions → CI → Run workflow，选择仓库默认分支。需要重跑时重新运行整个工作流（推送提交不会自动触发 CI），以便重新生成构建产物。PR 不会部署。
+> **CICD触发方式**：CI 只监听 `pull_request` 和手动 `workflow_dispatch`。**推送到 `master` 不会自动执行**，不点 Run workflow 就不会部署。
+>
+> - 为了节省资源想要部署必须新建一次 run；在旧 run 上点 Re-run 不会改变分支。
+> - 分支下拉选 `master`。选 `dev` 等其他分支时 `Deploy Production` 显示灰色 `Skipped`，只建置不部署。
+> - 想改成推送即部署：在 `.github/workflows/ci.yml` 的 `on:` 下加 `push:` / `branches: [master]`，代价是每次推 master 都直接改生产。
+
+GitHub → Actions → CI → Run workflow，选择 `master`。需要重跑时重新运行整个工作流，以便重新生成构建产物。PR 不会部署。
 
 等待 Backend Build and Package、Frontend Build and Package、Deploy Production 全部通过，再打开 `http://服务器公网IP`（前提是已套用 1.1 的 `nginx.conf`）。
 
