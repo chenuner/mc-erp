@@ -87,9 +87,6 @@ namespace MC.Erp.Migrations
                     b.Property<Guid?>("SiteCategoryDictId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("SiteId")
-                        .HasColumnType("uuid");
-
                     b.Property<Guid>("Type")
                         .HasColumnType("uuid");
 
@@ -112,8 +109,6 @@ namespace MC.Erp.Migrations
                     b.HasIndex("Type");
 
                     b.HasIndex("SiteCategoryDictId", "ReceiptDate");
-
-                    b.HasIndex("SiteId", "ReceiptDate");
 
                     b.ToTable("accounting_receipts", (string)null);
                 });
@@ -617,12 +612,6 @@ namespace MC.Erp.Migrations
                         .HasForeignKey("SiteCategoryDictId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("MC.Erp.Features.Attendance.Entities.Site", "Site")
-                        .WithMany()
-                        .HasForeignKey("SiteId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.HasOne("MC.Erp.Features.System.Entities.SysDict", "TypeDict")
                         .WithMany()
                         .HasForeignKey("Type")
@@ -632,8 +621,6 @@ namespace MC.Erp.Migrations
                     b.Navigation("DocumentTypeDict");
 
                     b.Navigation("FileItem");
-
-                    b.Navigation("Site");
 
                     b.Navigation("SiteCategoryDict");
 

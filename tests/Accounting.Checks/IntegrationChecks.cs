@@ -123,14 +123,12 @@ internal static class IntegrationChecks
             var systemGroup = groups.EnumerateArray().Single(group => group.GetProperty("code").GetString() == "Accounting");
             using (var deleteSystemGroup = await client.DeleteAsync($"system/dict-groups/{systemGroup.GetProperty("id").GetGuid()}"))
                 Check(deleteSystemGroup.StatusCode == HttpStatusCode.BadRequest, "system group cannot be deleted");
-            var siteA = (await Post("attendance/sites", new { name = "Check A", address = "A" })).GetProperty("id").GetGuid();
-            var siteB = (await Post("attendance/sites", new { name = "Check B", address = "B" })).GetProperty("id").GetGuid();
             var categoryA = (await Post("system/dicts", new { groupName = "AccountingSiteCategory", label = "Export A", value = "a", enabled = true })).GetProperty("id").GetGuid();
             var categoryB = (await Post("system/dicts", new { groupName = "AccountingSiteCategory", label = "Export B", value = "b", enabled = true })).GetProperty("id").GetGuid();
             var png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jWZkAAAAASUVORK5CYII=");
-            async Task<ReceiptResponse> Create(Guid site, Guid document)
+            async Task<ReceiptResponse> Create(Guid document)
             {
-                using var response = await client.PostAsJsonAsync("accounting/receipts", new { siteId = site, documentTypeDictId = document });
+                using var response = await client.PostAsJsonAsync("accounting/receipts", new { documentTypeDictId = document });
                 if (!response.IsSuccessStatusCode) throw new InvalidOperationException($"Create: {response.StatusCode} {await response.Content.ReadAsStringAsync()}");
                 return (await response.Content.ReadFromJsonAsync<ReceiptResponse>())!;
             }
@@ -144,10 +142,10 @@ internal static class IntegrationChecks
                 if (!response.IsSuccessStatusCode) throw new InvalidOperationException($"Attach: {response.StatusCode} {await response.Content.ReadAsStringAsync()}");
                 return (await response.Content.ReadFromJsonAsync<ReceiptResponse>())!;
             }
-            async Task<ReceiptResponse> Upload(Guid site, Guid document, byte[] bytes) => await Attach((await Create(site, document)).Id, bytes);
+            async Task<ReceiptResponse> Upload(Guid document, byte[] bytes) => await Attach((await Create(document)).Id, bytes);
 
             // 手動錄入：沒有原圖也可以先建票據
-            var manual = await Create(siteA, documentId);
+            var manual = await Create(documentId);
             Check(manual.FileItemId == null && manual.FileName == null, "manual receipt has no image");
             Check(manual.Type == pendingId && manual.TypeLabel == "待分類", "manual receipt starts as pending category");
             Check(manual.OcrStatus == "NotStarted", "manual receipt starts without OCR");
@@ -176,8 +174,8 @@ internal static class IntegrationChecks
             using (var noImageDownload = await client.GetAsync($"accounting/receipts/{manual.Id}/image"))
                 Check(noImageDownload.StatusCode == HttpStatusCode.NotFound, "missing original returns 404");
 
-            var first = await Upload(siteA, documentId, png);
-            var second = await Upload(siteB, secondDocumentId, png);
+            var first = await Upload(documentId, png);
+            var second = await Upload(secondDocumentId, png);
             Check(first.Md5 == Convert.ToHexStringLower(MD5.HashData(png)) && second.Md5 == first.Md5, "MD5 retained without deduplication");
             Check(first.Amount == null && first.ReceiptDate == null, "new receipt has no date or amount");
             using (var missing = await client.PostAsync($"accounting/receipts/{first.Id}/recognize", null)) Check(missing.StatusCode == HttpStatusCode.BadRequest, "OCR unavailable preserves draft");
@@ -192,7 +190,7 @@ internal static class IntegrationChecks
 
             async Task<ReceiptResponse> Save(ReceiptResponse receipt, Guid category, DateOnly date)
             {
-                var request = new UpdateReceiptRequest(receipt.Version, receipt.SiteId, receipt.DocumentTypeDictId,
+                var request = new UpdateReceiptRequest(receipt.Version, receipt.DocumentTypeDictId,
                     materialId, category, date, 110m, "HKD", "Supplier", "INV-1", null);
                 using var response = await client.PutAsJsonAsync($"accounting/receipts/{receipt.Id}", request);
                 if (!response.IsSuccessStatusCode) throw new InvalidOperationException($"Save: {response.StatusCode} {await response.Content.ReadAsStringAsync()}");
@@ -204,14 +202,14 @@ internal static class IntegrationChecks
             manual = await Save(manual, categoryB, new DateOnly(2026, 6, 1));
             Check(manual.FileItemId == null && manual.Type == materialId && manual.TypeLabel == "材料", "manual receipt saves category without image");
             using (var staleSave = await client.PutAsJsonAsync($"accounting/receipts/{first.Id}",
-                new UpdateReceiptRequest(staleVersion, siteA, documentId, materialId, categoryB, new DateOnly(2026, 1, 1), 1m, "HKD", null, null, null)))
+                new UpdateReceiptRequest(staleVersion, documentId, materialId, categoryB, new DateOnly(2026, 1, 1), 1m, "HKD", null, null, null)))
                 Check(staleSave.StatusCode == HttpStatusCode.Conflict, "stale edit rejected");
-            var filtered = await Get($"accounting/receipts?start=2026-01-01&end=2026-01-01&type={materialId}&siteId={siteA}");
-            Check(filtered.GetProperty("total").GetInt32() == 1, "inclusive date and actual site filtering");
+            var filtered = await Get($"accounting/receipts?start=2026-01-01&end=2026-01-01&type={materialId}");
+            Check(filtered.GetProperty("total").GetInt32() == 1, "inclusive date and category filtering");
             filtered = await Get($"accounting/receipts?siteCategoryDictId={categoryB}");
             Check(filtered.GetProperty("total").GetInt32() == 2
-                && filtered.GetProperty("items").EnumerateArray().All(item => item.GetProperty("siteId").GetGuid() == siteA),
-                "export category independent of actual site");
+                && filtered.GetProperty("items").EnumerateArray().All(item => item.GetProperty("siteCategoryDictId").GetGuid() == categoryB),
+                "site category filtering");
             filtered = await Get($"accounting/receipts?documentTypeDictId={secondDocumentId}");
             Check(filtered.GetProperty("total").GetInt32() == 1, "document type filtering");
             filtered = await Get("accounting/receipts?start=2026-01-01&end=2026-12-31&pageSize=1");
@@ -239,19 +237,19 @@ internal static class IntegrationChecks
                 clearMd5.Parameters.AddWithValue("id", second.FileItemId!.Value);
                 await clearMd5.ExecuteNonQueryAsync();
             }
-            await using (var noMd5 = await client.GetStreamAsync($"accounting/receipts/export?siteId={siteB}"))
+            await using (var noMd5 = await client.GetStreamAsync($"accounting/receipts/export?siteCategoryDictId={categoryA}"))
             using (var archive = new ZipArchive(noMd5, ZipArchiveMode.Read)) Check(archive.Entries.Count == 1, "historical null MD5 still exports");
             first = await client.GetFromJsonAsync<ReceiptResponse>($"accounting/receipts/{first.Id}") ?? throw new InvalidOperationException();
             first = await Save(first, categoryB, new DateOnly(2026, 1, 1));
             Check(first.Amount == 110m && first.CurrencyCode == "HKD", "saved receipt keeps amount and currency");
 
-            // 必填規則：導出地盤分類仍必填；日期、金額、幣種可以留空
-            var doomed = await Upload(siteA, documentId, png);
+            // 必填規則：地盤分類仍必填；日期、金額、幣種可以留空
+            var doomed = await Upload(documentId, png);
             using (var incomplete = await client.PutAsJsonAsync($"accounting/receipts/{doomed.Id}",
-                new UpdateReceiptRequest(doomed.Version, siteA, documentId, materialId, null, null, null, null, null, null, null)))
+                new UpdateReceiptRequest(doomed.Version, documentId, materialId, null, null, null, null, null, null, null)))
                 Check(incomplete.StatusCode == HttpStatusCode.BadRequest, "site category still required");
             using (var sparse = await client.PutAsJsonAsync($"accounting/receipts/{doomed.Id}",
-                new UpdateReceiptRequest(doomed.Version, siteA, documentId, materialId, categoryA, null, null, null, null, null, null)))
+                new UpdateReceiptRequest(doomed.Version, documentId, materialId, categoryA, null, null, null, null, null, null)))
             {
                 Check(sparse.StatusCode == HttpStatusCode.OK, "date, amount and currency are optional");
                 doomed = (await sparse.Content.ReadFromJsonAsync<ReceiptResponse>())!;

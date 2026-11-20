@@ -15,11 +15,11 @@ public static class AccountingEndpoints
         var group = app.MapGroup("/api/accounting").WithTags("Accounting").RequireAuthorization("admin")
             .AddEndpointFilter<ExceptionProblemFilter>();
         group.MapGet("/status", (ReceiptService service) => TypedResults.Ok(new { ocrConfigured = service.OcrConfigured }));
-        group.MapGet("/receipts", async (Guid? siteId, Guid? documentTypeDictId, Guid? type,
+        group.MapGet("/receipts", async (Guid? documentTypeDictId, Guid? type,
             Guid? siteCategoryDictId, DateOnly? start, DateOnly? end,
             int? page, int? pageSize, ReceiptService service) =>
         {
-            var filter = Filter(siteId, documentTypeDictId, type, siteCategoryDictId, start, end);
+            var filter = Filter(documentTypeDictId, type, siteCategoryDictId, start, end);
             var currentPage = Math.Clamp(page ?? 1, 1, 1000000);
             var size = Math.Clamp(pageSize ?? 20, 1, 100);
             var result = await service.ListAsync(filter, currentPage, size);
@@ -28,15 +28,15 @@ public static class AccountingEndpoints
         });
         group.MapPost("/receipts", async (CreateReceiptRequest request, ReceiptService service) =>
         {
-            var receipt = await service.CreateAsync(request.SiteId, request.DocumentTypeDictId);
+            var receipt = await service.CreateAsync(request.DocumentTypeDictId);
             return TypedResults.Created($"/api/accounting/receipts/{receipt.Id}", ReceiptResponse.From(receipt));
         });
         group.MapPost("/receipts/{id:guid}/image", async (Guid id, IFormFile file, ReceiptService service) =>
             TypedResults.Ok(ReceiptResponse.From(await service.AttachImageAsync(id, file)))).DisableAntiforgery();
-        group.MapGet("/receipts/export", async (Guid? siteId, Guid? documentTypeDictId, Guid? type,
+        group.MapGet("/receipts/export", async (Guid? documentTypeDictId, Guid? type,
             Guid? siteCategoryDictId, DateOnly? start, DateOnly? end, ReceiptService service) =>
         {
-            var archive = await service.ExportAsync(Filter(siteId, documentTypeDictId, type, siteCategoryDictId, start, end));
+            var archive = await service.ExportAsync(Filter(documentTypeDictId, type, siteCategoryDictId, start, end));
             return TypedResults.File(archive.Content, "application/zip", archive.Name);
         });
         group.MapGet("/receipts/{id:guid}", async (Guid id, ReceiptService service) => TypedResults.Ok(ReceiptResponse.From(await service.FindAsync(id))));
@@ -61,20 +61,20 @@ public static class AccountingEndpoints
         });
     }
 
-    private static ReceiptFilter Filter(Guid? siteId, Guid? documentType, Guid? type, Guid? siteCategory,
+    private static ReceiptFilter Filter(Guid? documentType, Guid? type, Guid? siteCategory,
         DateOnly? start, DateOnly? end)
     {
         if (start > end) throw new InvalidOperationException("開始日期不能晚於結束日期");
-        return new(siteId, documentType, type, siteCategory, start, end);
+        return new(documentType, type, siteCategory, start, end);
     }
 }
 
-public sealed record CreateReceiptRequest(Guid SiteId, Guid DocumentTypeDictId);
+public sealed record CreateReceiptRequest(Guid DocumentTypeDictId);
 
 public sealed record RecognizeResponse(ReceiptResponse Receipt, OcrSuggestion Fields);
 
 public sealed record ReceiptResponse(Guid Id, Guid Version, Guid? FileItemId, string? FileName, string? Md5,
-    long? SizeBytes, Guid SiteId, string SiteName, Guid DocumentTypeDictId, string DocumentTypeLabel,
+    long? SizeBytes, Guid DocumentTypeDictId, string DocumentTypeLabel,
     Guid Type, string TypeLabel, Guid? SiteCategoryDictId, string? SiteCategoryLabel,
     DateOnly? ReceiptDate, decimal? Amount, string? CurrencyCode, string? MerchantName,
     string? InvoiceNumber, string? Remark, string OcrStatus, string? OcrError,
@@ -82,7 +82,7 @@ public sealed record ReceiptResponse(Guid Id, Guid Version, Guid? FileItemId, st
 {
     public static ReceiptResponse From(Receipt receipt) => new(receipt.Id, receipt.Version,
         receipt.FileItemId, receipt.FileItem?.OriginalName, receipt.FileItem?.Md5, receipt.FileItem?.SizeBytes,
-        receipt.SiteId, receipt.Site.Name, receipt.DocumentTypeDictId, receipt.DocumentTypeDict.Label,
+        receipt.DocumentTypeDictId, receipt.DocumentTypeDict.Label,
         receipt.Type, receipt.TypeDict.Label, receipt.SiteCategoryDictId, receipt.SiteCategoryDict?.Label,
         receipt.ReceiptDate, receipt.Amount, receipt.CurrencyCode, receipt.MerchantName,
         receipt.InvoiceNumber, receipt.Remark, receipt.OcrStatus, receipt.OcrError, receipt.OcrText,

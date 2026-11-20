@@ -21,7 +21,7 @@ public static class SeedData
         {
             ("Accounting", "支出分類", 0),
             ("AccountingDocumentType", "票據類型", 1),
-            ("AccountingSiteCategory", "導出地盤分類", 2)
+            ("AccountingSiteCategory", "地盤分類", 2)
         };
         var existingGroups = await db.SysDictGroups.ToListAsync();
         foreach (var (code, name, sort) in systemGroups)
@@ -33,9 +33,9 @@ public static class SeedData
                 continue;
             }
 
-            if (group.IsSystem) continue;
+            // 系統分組的名稱及排序由程式決定，方便改名後自動追上
             group.IsSystem = true;
-            if (group.Name == code) group.Name = name;
+            group.Name = name;
             group.Sort = sort;
         }
         await db.SaveChangesAsync();

@@ -3,7 +3,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import AppIcon from '@/components/AppIcon.vue'
 import { useAuthStore } from '@/stores/auth'
-import { listSites, type SiteDto } from '@/api/attendance'
 import { listSysDictsByGroup, type SysDictDto } from '@/api/system'
 import { accountingStatus, listReceipts, getReceipt, createReceipt, attachReceiptImage, recognizeReceipt,
   updateReceipt, deleteReceipt, receiptImage, exportReceiptImages, downloadBlob, type ReceiptDto,
@@ -19,16 +18,25 @@ const rows = ref<ReceiptDto[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
-const sites = ref<SiteDto[]>([])
 const documentTypes = ref<SysDictDto[]>([])
 const types = ref<SysDictDto[]>([])
 const siteCategories = ref<SysDictDto[]>([])
-const filter = reactive({ siteId: '', documentTypeDictId: '', type: '' })
+const filter = reactive({ siteCategoryDictId: '', documentTypeDictId: '', type: '' })
 const dates = ref<[string, string] | null>(null)
 const selected = ref<ReceiptDto | null>(null)
 const detailVisible = ref(false)
 const exportVisible = ref(false)
-const exportSiteCategory = ref('')
+const exportFormRef = ref<FormInstance>()
+/** 提取圖片對話框的獨立條件，不跟主篩選連動。 */
+const exportForm = reactive({
+  siteCategoryDictId: '',
+  documentTypeDictId: '',
+  type: '',
+  dates: null as [string, string] | null,
+})
+const exportRules: FormRules = {
+  siteCategoryDictId: [{ required: true, message: '請選擇地盤分類', trigger: 'change' }],
+}
 const exportCount = ref<number | null>(null)
 const exportCountLoading = ref(false)
 const albumInput = ref<HTMLInputElement>()
@@ -37,16 +45,9 @@ const imageUrl = ref('')
 const imageLoading = ref(false)
 const ocrPanel = ref<string[]>([])
 const formRef = ref<FormInstance>()
-const form = reactive<UpdateReceipt>({ version: '', siteId: '', documentTypeDictId: '', type: '', siteCategoryDictId: null,
+const form = reactive<UpdateReceipt>({ version: '', documentTypeDictId: '', type: '', siteCategoryDictId: null,
   receiptDate: null, amount: null, currencyCode: null, merchantName: null, invoiceNumber: null, remark: null })
 const rules: FormRules = {
-  siteId: [{ required: true, message: '請選擇實際地盤', trigger: 'change' },
-    { validator: (_rule: unknown, value: string, callback: (error?: Error) => void) => {
-        const site = sites.value.find(item => item.id === value)
-        if (!site) callback(new Error('請選擇實際地盤'))
-        else if (!site.isActive) callback(new Error('此實際地盤已停用'))
-        else callback()
-      }, trigger: 'change' }],
   documentTypeDictId: [{ required: true, message: '請選擇票據類型', trigger: 'change' },
     { validator: (_rule: unknown, value: string, callback: (error?: Error) => void) => {
         const dict = documentTypes.value.find(item => item.id === value)
@@ -61,10 +62,10 @@ const rules: FormRules = {
         else if (dict.value === 'pending') callback(new Error('不能選「待分類」，請選擇實際分類'))
         else callback()
       }, trigger: 'change' }],
-  siteCategoryDictId: [{ required: true, message: '請選擇導出地盤分類', trigger: 'change' },
+  siteCategoryDictId: [{ required: true, message: '請選擇地盤分類', trigger: 'change' },
     { validator: (_rule: unknown, value: string, callback: (error?: Error) => void) => {
         const dict = siteCategories.value.find(item => item.id === value)
-        if (!dict || !dict.enabled) callback(new Error('此導出地盤分類已停用'))
+        if (!dict || !dict.enabled) callback(new Error('此地盤分類已停用'))
         else callback()
       }, trigger: 'change' }],
   amount: [{ validator: (_rule: unknown, value: number | null, callback: (error?: Error) => void) => {
@@ -86,7 +87,8 @@ const confidenceFields = computed(() => Object.entries(selected.value?.ocrResult
 const pendingTypeSelected = computed(() => types.value.find(dict => dict.id === form.type)?.value === 'pending')
 
 function query(): ReceiptQuery {
-  return { siteId: filter.siteId || undefined, documentTypeDictId: filter.documentTypeDictId || undefined,
+  return { siteCategoryDictId: filter.siteCategoryDictId || undefined,
+    documentTypeDictId: filter.documentTypeDictId || undefined,
     type: filter.type || undefined, start: dates.value?.[0], end: dates.value?.[1] }
 }
 
@@ -103,7 +105,7 @@ async function load(reset = false) {
 
 function fill(receipt: ReceiptDto) {
   selected.value = receipt
-  Object.assign(form, { version: receipt.version, siteId: receipt.siteId, documentTypeDictId: receipt.documentTypeDictId,
+  Object.assign(form, { version: receipt.version, documentTypeDictId: receipt.documentTypeDictId,
     type: receipt.type, siteCategoryDictId: receipt.siteCategoryDictId, receiptDate: receipt.receiptDate,
     amount: receipt.amount, currencyCode: receipt.currencyCode, merchantName: receipt.merchantName,
     invoiceNumber: receipt.invoiceNumber, remark: receipt.remark })
@@ -115,10 +117,10 @@ function revokeImage() {
 }
 
 function resetForm() {
-  Object.assign(form, { version: '', siteId: filter.siteId,
+  Object.assign(form, { version: '',
     documentTypeDictId: documentTypes.value.find(dict => dict.enabled && dict.value === 'receipt')?.id ?? '',
     type: '',
-    siteCategoryDictId: null, receiptDate: null, amount: null, currencyCode: null,
+    siteCategoryDictId: filter.siteCategoryDictId || null, receiptDate: null, amount: null, currencyCode: null,
     merchantName: null, invoiceNumber: null, remark: null })
 }
 
@@ -160,13 +162,12 @@ async function chooseFile(event: Event) {
 
 /** 選擇圖片後立即保存原圖；新票據會先建立，再附上原圖。不會自動識別。 */
 async function attachImage(file: File) {
-  if (!form.siteId) { ElMessage.warning('請先選擇實際支出地盤'); return }
   if (!form.documentTypeDictId) { ElMessage.warning('請先選擇票據類型'); return }
   busy.value = true
   try {
     let receipt = selected.value
     if (!receipt) {
-      receipt = await createReceipt(form.siteId, form.documentTypeDictId)
+      receipt = await createReceipt(form.documentTypeDictId)
       selected.value = receipt
       form.version = receipt.version
     }
@@ -233,7 +234,7 @@ async function save() {
   try {
     let receipt = selected.value
     if (!receipt) {
-      receipt = await createReceipt(form.siteId, form.documentTypeDictId)
+      receipt = await createReceipt(form.documentTypeDictId)
       selected.value = receipt
       form.version = receipt.version
     }
@@ -272,24 +273,51 @@ function downloadOriginal() {
   receiptImage(selected.value.id).then(blob => downloadBlob(blob, selected.value!.fileName ?? 'receipt')).catch(() => {})
 }
 
+/** 字典的第一個啟用項，用於對話框預設值；skipValue 用於略過「待分類」這類特殊值。 */
+function firstEnabledId(list: SysDictDto[], skipValue?: string) {
+  return (list.find(dict => dict.enabled && dict.value !== skipValue)
+    ?? list.find(dict => dict.enabled))?.id ?? ''
+}
+
+/** 預設日期範圍：近三個月（含今日）。 */
+function recentThreeMonths(): [string, string] {
+  const end = new Date()
+  const start = new Date(end.getFullYear(), end.getMonth() - 3, end.getDate())
+  const format = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  return [format(start), format(end)]
+}
+
+function exportQuery(): ReceiptQuery {
+  return { siteCategoryDictId: exportForm.siteCategoryDictId || undefined,
+    documentTypeDictId: exportForm.documentTypeDictId || undefined,
+    type: exportForm.type || undefined,
+    start: exportForm.dates?.[0], end: exportForm.dates?.[1] }
+}
+
 async function countExport() {
+  if (!exportForm.siteCategoryDictId) { exportCount.value = null; return }
   exportCountLoading.value = true
   exportCount.value = null
-  try { exportCount.value = (await listReceipts({ ...query(), siteCategoryDictId: exportSiteCategory.value || undefined }, 1, 1)).total }
+  try { exportCount.value = (await listReceipts(exportQuery(), 1, 1)).total }
   catch { /* 已由攔截器提示 */ }
   finally { exportCountLoading.value = false }
 }
 
 async function openExport() {
-  exportSiteCategory.value = ''
+  exportForm.siteCategoryDictId = firstEnabledId(siteCategories.value)
+  exportForm.documentTypeDictId = firstEnabledId(documentTypes.value)
+  exportForm.type = firstEnabledId(types.value, 'pending')
+  exportForm.dates = recentThreeMonths()
   exportVisible.value = true
+  nextTick(() => exportFormRef.value?.clearValidate())
   await countExport()
 }
 
 async function downloadArchive() {
+  if (!await exportFormRef.value?.validate().catch(() => false)) return
   exporting.value = true
   try {
-    downloadBlob(await exportReceiptImages({ ...query(), siteCategoryDictId: exportSiteCategory.value || undefined }), 'accounting-images.zip')
+    downloadBlob(await exportReceiptImages(exportQuery()), 'accounting-images.zip')
     exportVisible.value = false
   } catch { /* 已由攔截器提示 */ }
   finally { exporting.value = false }
@@ -299,11 +327,10 @@ onMounted(async () => {
   if (!isAdmin.value) return
   loading.value = true
   try {
-    const [siteList, documentList, typeList, categoryList, status] = await Promise.all([
-      listSites(), listSysDictsByGroup('AccountingDocumentType'), listSysDictsByGroup('Accounting'),
+    const [documentList, typeList, categoryList, status] = await Promise.all([
+      listSysDictsByGroup('AccountingDocumentType'), listSysDictsByGroup('Accounting'),
       listSysDictsByGroup('AccountingSiteCategory'), accountingStatus(),
     ])
-    sites.value = siteList
     documentTypes.value = documentList
     types.value = typeList
     siteCategories.value = categoryList
@@ -327,7 +354,7 @@ onBeforeUnmount(revokeImage)
     </header>
     <el-alert v-if="!configured && !loading" title="OCR 尚未配置：票據可直接手動填寫及保存，原圖照常保存；配置後可上傳原圖再按「OCR 識別」讀取資料" type="warning" :closable="false" show-icon />
     <el-form class="filters" label-position="top" @submit.prevent="load(true)">
-      <el-form-item label="實際支出地盤"><el-select v-model="filter.siteId" clearable filterable><el-option v-for="site in sites" :key="site.id" :label="site.name" :value="site.id" /></el-select></el-form-item>
+      <el-form-item label="地盤分類"><el-select v-model="filter.siteCategoryDictId" clearable filterable><el-option v-for="dict in siteCategories" :key="dict.id" :label="dict.label" :value="dict.id" /></el-select></el-form-item>
       <el-form-item label="票據類型"><el-select v-model="filter.documentTypeDictId" clearable><el-option v-for="dict in documentTypes" :key="dict.id" :label="dict.label" :value="dict.id" /></el-select></el-form-item>
       <el-form-item label="支出分類"><el-select v-model="filter.type" clearable><el-option v-for="dict in types" :key="dict.id" :label="dict.label" :value="dict.id" /></el-select></el-form-item>
       <el-form-item label="票據日期"><el-date-picker v-model="dates" type="daterange" value-format="YYYY-MM-DD" start-placeholder="開始日期" end-placeholder="結束日期" /></el-form-item>
@@ -338,7 +365,7 @@ onBeforeUnmount(revokeImage)
       <el-table v-loading="loading" :data="rows" stripe max-height="600" empty-text="沒有符合條件的票據">
         <el-table-column prop="receiptDate" label="票據日期" width="120"><template #default="{ row }">{{ row.receiptDate || '未填寫' }}</template></el-table-column>
         <el-table-column prop="merchantName" label="商戶 / 供應商" min-width="160" show-overflow-tooltip />
-        <el-table-column prop="siteName" label="實際地盤" min-width="145" show-overflow-tooltip />
+        <el-table-column prop="siteCategoryLabel" label="地盤分類" min-width="145" show-overflow-tooltip />
         <el-table-column prop="documentTypeLabel" label="票據類型" width="100" />
         <el-table-column prop="typeLabel" label="支出分類" width="100" />
         <el-table-column label="金額" width="160" align="right"><template #default="{ row }"><span class="number">{{ row.amount == null ? '未填寫' : `${row.currencyCode || '?'} ${row.amount.toLocaleString('zh-HK', { minimumFractionDigits: 2 })}` }}</span></template></el-table-column>
@@ -388,12 +415,11 @@ onBeforeUnmount(revokeImage)
           </el-collapse>
         </div>
         <el-form ref="formRef" :model="form" :rules="rules" label-position="top" :disabled="busy">
-          <el-form-item label="實際支出地盤" prop="siteId"><el-select v-model="form.siteId" filterable><el-option v-for="site in sites" :key="site.id" :label="site.name" :value="site.id" :disabled="!site.isActive" /></el-select></el-form-item>
           <div class="form-pair">
             <el-form-item label="票據類型" prop="documentTypeDictId"><el-select v-model="form.documentTypeDictId"><el-option v-for="dict in documentTypes" :key="dict.id" :label="dict.label" :value="dict.id" :disabled="!dict.enabled" /></el-select></el-form-item>
             <el-form-item label="支出分類" prop="type"><el-select v-model="form.type" placeholder="請選擇"><el-option v-for="dict in types" :key="dict.id" :label="dict.label" :value="dict.id" :disabled="!dict.enabled || dict.value === 'pending'" /></el-select><span v-if="pendingTypeSelected" class="form-hint">「待分類」不能保存，請選擇實際分類</span></el-form-item>
           </div>
-          <el-form-item label="導出地盤分類" prop="siteCategoryDictId"><el-select v-model="form.siteCategoryDictId" clearable filterable placeholder="請選擇"><el-option v-for="dict in siteCategories" :key="dict.id" :label="dict.label" :value="dict.id" :disabled="!dict.enabled" /></el-select><router-link v-if="!siteCategories.length" to="/system/categories" @click="detailVisible = false">新增 AccountingSiteCategory 字典</router-link></el-form-item>
+          <el-form-item label="地盤分類" prop="siteCategoryDictId"><el-select v-model="form.siteCategoryDictId" clearable filterable placeholder="請選擇"><el-option v-for="dict in siteCategories" :key="dict.id" :label="dict.label" :value="dict.id" :disabled="!dict.enabled" /></el-select><router-link v-if="!siteCategories.length" to="/system/categories" @click="detailVisible = false">新增地盤分類字典</router-link></el-form-item>
           <el-form-item label="票據日期" prop="receiptDate"><el-date-picker v-model="form.receiptDate" type="date" value-format="YYYY-MM-DD" placeholder="請選擇日期" /></el-form-item>
           <div class="form-pair">
             <el-form-item label="金額" prop="amount"><el-input-number v-model="form.amount" :min="0" :precision="2" :controls="false" placeholder="請輸入金額" /></el-form-item>
@@ -407,9 +433,17 @@ onBeforeUnmount(revokeImage)
       <template #footer><el-button v-if="selected" type="danger" link :disabled="busy" @click="removeReceipt(selected)">刪除</el-button><el-button :disabled="busy" @click="detailVisible = false">取消</el-button><el-button type="primary" :loading="busy" @click="save">保存</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="exportVisible" title="提取票據圖片" width="min(480px, calc(100vw - 32px))" :close-on-click-modal="!exporting" :show-close="!exporting" :close-on-press-escape="!exporting">
-      <el-form label-position="top"><el-form-item label="導出地盤分類"><el-select v-model="exportSiteCategory" clearable filterable @change="countExport"><el-option v-for="dict in siteCategories" :key="dict.id" :label="dict.label" :value="dict.id" /></el-select></el-form-item></el-form>
-      <el-descriptions :column="1"><el-descriptions-item label="日期">{{ dates?.join(' 至 ') || '全部日期' }}</el-descriptions-item><el-descriptions-item label="票據類型">{{ documentTypes.find(dict => dict.id === filter.documentTypeDictId)?.label || '全部' }}</el-descriptions-item><el-descriptions-item label="支出分類">{{ types.find(dict => dict.id === filter.type)?.label || '全部' }}</el-descriptions-item><el-descriptions-item label="圖片數量">{{ exportCountLoading ? '查詢中' : exportCount ?? '未取得' }}</el-descriptions-item></el-descriptions>
+    <el-dialog v-model="exportVisible" title="提取票據圖片" width="min(560px, calc(100vw - 32px))" :close-on-click-modal="!exporting" :show-close="!exporting" :close-on-press-escape="!exporting">
+      <el-form ref="exportFormRef" class="export-form" :model="exportForm" :rules="exportRules" label-position="top" :disabled="exporting">
+        <el-form-item label="地盤分類" prop="siteCategoryDictId"><el-select v-model="exportForm.siteCategoryDictId" filterable placeholder="請選擇" @change="countExport"><el-option v-for="dict in siteCategories" :key="dict.id" :label="dict.label" :value="dict.id" :disabled="!dict.enabled" /></el-select><router-link v-if="!siteCategories.length" to="/system/categories" @click="exportVisible = false">新增地盤分類字典</router-link></el-form-item>
+        <div class="form-pair">
+          <el-form-item label="票據類型"><el-select v-model="exportForm.documentTypeDictId" clearable placeholder="全部" @change="countExport"><el-option v-for="dict in documentTypes" :key="dict.id" :label="dict.label" :value="dict.id" :disabled="!dict.enabled" /></el-select></el-form-item>
+          <el-form-item label="支出分類"><el-select v-model="exportForm.type" clearable placeholder="全部" @change="countExport"><el-option v-for="dict in types" :key="dict.id" :label="dict.label" :value="dict.id" :disabled="!dict.enabled" /></el-select></el-form-item>
+        </div>
+        <el-form-item label="票據日期"><el-date-picker v-model="exportForm.dates" type="daterange" value-format="YYYY-MM-DD" start-placeholder="開始日期" end-placeholder="結束日期" @change="countExport" /></el-form-item>
+      </el-form>
+      <el-descriptions :column="1"><el-descriptions-item label="符合票據">{{ exportCountLoading ? '查詢中' : exportCount ?? '未取得' }}</el-descriptions-item></el-descriptions>
+      <p class="export-hint">只包含已上傳原圖的票據。設定日期範圍時，未填票據日期的票據不會被包含；清空日期可包含它們。</p>
       <template #footer><el-button :disabled="exporting" @click="exportVisible = false">取消</el-button><el-button type="primary" :loading="exporting" :disabled="!exportCount || exportCountLoading" @click="downloadArchive"><AppIcon name="download" :size="16" />下載 ZIP</el-button></template>
     </el-dialog>
   </div>
@@ -424,6 +458,9 @@ onBeforeUnmount(revokeImage)
 .filters { display: grid; grid-template-columns: repeat(3, minmax(140px, 1fr)); gap: 16px; align-items: end; }
 .filters .el-form-item { margin-bottom: 0; min-width: 0; }
 .filters :deep(.el-date-editor), .detail-grid :deep(.el-date-editor), .detail-grid :deep(.el-input-number) { width: 100%; min-width: 0; }
+.export-form :deep(.el-select), .export-form :deep(.el-date-editor) { width: 100%; min-width: 0; }
+.export-form .el-form-item { margin-bottom: 18px; }
+.export-hint { margin: 0; font-size: 12px; line-height: 1.6; color: var(--el-text-color-secondary); }
 .results { background: var(--el-bg-color); border-top: 1px solid var(--el-border-color); min-width: 0; }
 .result-heading { padding: 12px 16px; }
 .el-pagination { padding: 16px 0; justify-content: flex-end; flex-wrap: wrap; }

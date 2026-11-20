@@ -1,5 +1,4 @@
 using MC.Erp.Common.Domain;
-using MC.Erp.Features.Attendance.Entities;
 using MC.Erp.Features.Storage.Entities;
 using MC.Erp.Features.System.Entities;
 
@@ -10,8 +9,6 @@ public sealed class Receipt : AuditableEntity
     /// <summary>票據原圖；手動錄入的票據可以先沒有原圖，之後再補上傳。</summary>
     public Guid? FileItemId { get; set; }
     public FileItem? FileItem { get; set; }
-    public Guid SiteId { get; set; }
-    public Site Site { get; set; } = null!;
     public Guid DocumentTypeDictId { get; set; }
     public SysDict DocumentTypeDict { get; set; } = null!;
 
@@ -21,6 +18,8 @@ public sealed class Receipt : AuditableEntity
     /// </summary>
     public Guid Type { get; set; }
     public SysDict TypeDict { get; set; } = null!;
+
+    /// <summary>地盤分類（AccountingSiteCategory 字典），票據唯一的地盤歸屬，亦是導出 ZIP 的頂層目錄。</summary>
     public Guid? SiteCategoryDictId { get; set; }
     public SysDict? SiteCategoryDict { get; set; }
     public DateOnly? ReceiptDate { get; set; }
