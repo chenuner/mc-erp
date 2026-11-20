@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox, type UploadFile, type UploadFiles, type UploadRequestOptions } from 'element-plus'
+import { ElMessage, ElMessageBox, type UploadFiles, type UploadInstance, type UploadRequestOptions } from 'element-plus'
 import AppIcon from '@/components/AppIcon.vue'
 import { listSysDictGroups, listSysDicts, type SysDictDto, type SysDictGroupDto } from '@/api/system'
 import {
@@ -93,21 +93,25 @@ const uploadType = ref('')
 const uploadDialog = ref(false)
 const uploading = ref(false)
 const uploadFileList = ref<UploadFiles>([])
+const uploadRef = ref<UploadInstance>()
 
 const uploadDisabled = computed(() => !uploadType.value || uploadFileList.value.length === 0)
+
+/** 清空上傳對話框的全部狀態：el-upload 內部列表、受控列表、已選類別 */
+function resetUpload() {
+  uploadRef.value?.clearFiles()
+  uploadFileList.value = []
+  uploadType.value = ''
+}
 
 function openUpload() {
   if (enabledDicts.value.length === 0) {
     ElMessage.warning('請先到「系統設置 / 系統字典」新增並啟用字典項')
     return
   }
+  resetUpload()
   uploadType.value = enabledDicts.value.find((dict) => dict.id === filterType.value)?.id ?? ''
-  uploadFileList.value = []
   uploadDialog.value = true
-}
-
-function onFileChange(_file: UploadFile, fileList: UploadFiles) {
-  uploadFileList.value = fileList
 }
 
 function doUpload(_options: UploadRequestOptions) {
@@ -118,19 +122,29 @@ async function confirmUpload() {
   if (uploadDisabled.value) return
   uploading.value = true
   let ok = 0
+  const failed: string[] = []
   try {
     for (const f of uploadFileList.value) {
+      if (!f.raw) continue
       try {
-        await uploadFile(uploadType.value, f.raw!)
+        await uploadFile(uploadType.value, f.raw)
         ok++
       } catch {
-        /* 單個失敗繼續後面的 */
+        /* 單個失敗繼續後面的；具體原因由攔截器提示 */
+        failed.push(f.name)
       }
     }
-    if (ok > 0) {
+    if (ok > 0) await fetchFiles()
+
+    if (ok > 0 && failed.length === 0) {
       ElMessage.success(`${ok} 個文件上傳成功`)
       uploadDialog.value = false
-      await fetchFiles()
+    } else if (ok > 0) {
+      ElMessage.warning(`${ok} 個成功，${failed.length} 個失敗：${failed.join('、')}`)
+      uploadDialog.value = false
+    } else if (failed.length > 0) {
+      // 全部失敗：保留對話框與已選文件，方便直接重試
+      ElMessage.error(`${failed.length} 個文件上傳失敗：${failed.join('、')}`)
     }
   } finally {
     uploading.value = false
@@ -211,12 +225,18 @@ function preloadPreviewNeighbors(index: number, session: number) {
 
 async function loadPreviewImage(index: number, session = previewSession, showLoading = false): Promise<void> {
   const file = previewFiles.value[index]
-  if (session !== previewSession || !file || previewUrls.value[index] !== previewPlaceholder) return
+  if (session !== previewSession || !file) return
+  // 該格已就緒（先前載入或預載完成），不必再請求，但要收掉加載態
+  if (previewUrls.value[index] !== previewPlaceholder) {
+    if (showLoading) previewLoading.value = false
+    return
+  }
 
   const cacheKey = previewCacheKey(file)
   const cachedUrl = previewUrlCache.get(cacheKey)
   if (cachedUrl) {
     previewUrls.value[index] = cachedUrl
+    if (showLoading) previewLoading.value = false
     return
   }
 
@@ -427,10 +447,18 @@ onMounted(async () => {
     </div>
 
     <!-- 上傳 -->
-    <el-dialog v-model="uploadDialog" title="上傳文件" width="520px" :close-on-click-modal="false">
+    <el-dialog
+      v-model="uploadDialog"
+      title="上傳文件"
+      width="520px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="!uploading"
+      :show-close="!uploading"
+      @close="resetUpload"
+    >
       <el-form label-position="top">
         <el-form-item label="文件類別" required>
-          <el-select v-model="uploadType" placeholder="選擇系統字典項" filterable style="width: 100%">
+          <el-select v-model="uploadType" placeholder="選擇系統字典項" filterable style="width: 100%" :disabled="uploading">
             <el-option
               v-for="dict in enabledDicts"
               :key="dict.id"
@@ -441,11 +469,13 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item label="文件">
           <el-upload
+            ref="uploadRef"
+            v-model:file-list="uploadFileList"
             drag
             multiple
             :auto-upload="false"
             :http-request="doUpload"
-            :on-change="onFileChange"
+            :disabled="uploading"
             accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.zip"
           >
             <div class="upload-dragger">
@@ -457,26 +487,31 @@ onMounted(async () => {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="uploadDialog = false">取消</el-button>
+        <el-button :disabled="uploading" @click="uploadDialog = false">取消</el-button>
         <el-button type="primary" :disabled="uploadDisabled" :loading="uploading" @click="confirmUpload">
           上傳（{{ uploadFileList.length }} 個文件）
         </el-button>
       </template>
     </el-dialog>
 
-    <!-- 圖片預覽 -->
-    <el-dialog v-model="previewVisible" title="圖片預覽" width="80vw" top="6vh" :close-on-click-modal="false" @close="closePreview">
-      <div v-loading="previewLoading" class="preview-wrap">
-        <el-image-viewer
-          v-if="previewUrls.length > 0"
-          :url-list="previewUrls"
-          :initial-index="previewIndex"
-          hide-on-click-modal
-          @switch="onPreviewSwitch"
-          @close="closePreview"
-        />
-      </div>
-    </el-dialog>
+    <!-- 圖片預覽：全屏 viewer 自行 Teleport 到 body，不能再套 el-dialog -->
+    <el-image-viewer
+      v-if="previewVisible"
+      :url-list="previewUrls"
+      :initial-index="previewIndex"
+      hide-on-click-modal
+      @switch="onPreviewSwitch"
+      @close="closePreview"
+    >
+      <template #default>
+        <div v-if="previewLoading" class="preview-loading">
+          <el-icon class="is-loading"><AppIcon name="refresh-cw" :size="28" /></el-icon>
+        </div>
+      </template>
+      <template #viewer-error>
+        <div class="preview-error">圖片加載失敗</div>
+      </template>
+    </el-image-viewer>
   </div>
 </template>
 
@@ -631,15 +666,20 @@ onMounted(async () => {
   font-size: 12px;
 }
 
-/* 預覽 */
-.preview-wrap {
-  min-height: 300px;
+/* 預覽：viewer 已自行全屏（Teleport 到 body），這裡只放加載態 */
+.preview-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
+  color: #fff;
+  pointer-events: none;
 }
 
-.preview-wrap :deep(.el-image-viewer__img) {
-  max-height: 78vh;
+.preview-error {
+  color: #fff;
+  font-size: 14px;
 }
 </style>
