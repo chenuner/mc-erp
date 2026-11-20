@@ -2,7 +2,6 @@ using System.Text.RegularExpressions;
 using MC.Erp.Common.Infrastructure.Ocr;
 using MC.Erp.Features.Accounting.Entities;
 using MC.Erp.Features.Accounting.Repositories;
-using MC.Erp.Features.Attendance.Services;
 using MC.Erp.Features.Storage.Services;
 using MC.Erp.Features.System.Entities;
 using MC.Erp.Features.System.Services;
@@ -10,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MC.Erp.Features.Accounting.Services;
 
-public sealed record UpdateReceiptRequest(Guid Version, Guid SiteId, Guid DocumentTypeDictId,
+public sealed record UpdateReceiptRequest(Guid Version, Guid DocumentTypeDictId,
     Guid Type, Guid? SiteCategoryDictId, DateOnly? ReceiptDate, decimal? Amount,
     string? CurrencyCode, string? MerchantName, string? InvoiceNumber, string? Remark);
 
@@ -19,7 +18,7 @@ public sealed record OcrSuggestion(string? MerchantName, DateOnly? ReceiptDate, 
     string? CurrencyCode, string? InvoiceNumber, string? CategoryValue);
 
 public sealed class ReceiptService(ReceiptRepository repo, FileService files, SysDictService dicts,
-    AttendanceServices attendance, IOcrService ocr, ILogger<ReceiptService> logger)
+    IOcrService ocr, ILogger<ReceiptService> logger)
 {
     public bool OcrConfigured => ocr.IsConfigured;
     public Task<(List<Receipt> Items, int Total)> ListAsync(ReceiptFilter filter, int page, int pageSize)
@@ -33,19 +32,12 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
         return dict;
     }
 
-    private async Task CheckSiteAsync(Guid id)
+    public async Task<Receipt> CreateAsync(Guid documentTypeDictId)
     {
-        if (!(await attendance.GetSitesAsync()).Any(site => site.Id == id && site.IsActive))
-            throw new InvalidOperationException("請選擇有效且啟用的實際地盤");
-    }
-
-    public async Task<Receipt> CreateAsync(Guid siteId, Guid documentTypeDictId)
-    {
-        await CheckSiteAsync(siteId);
         var documentType = await DictAsync(documentTypeDictId, "AccountingDocumentType");
         CheckModel(documentType.Value);
         var type = await PendingTypeAsync();
-        var receipt = new Receipt { SiteId = siteId, DocumentTypeDictId = documentType.Id, Type = type.Id };
+        var receipt = new Receipt { DocumentTypeDictId = documentType.Id, Type = type.Id };
         await repo.AddAsync(receipt);
         return await FindAsync(receipt.Id);
     }
@@ -125,13 +117,12 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
         if (receipt.Version != request.Version) throw new DbUpdateConcurrencyException();
         if (receipt.OcrStatus == "Processing" && receipt.OcrStartedAt > DateTime.UtcNow.AddMinutes(-3))
             throw new InvalidOperationException("識別進行中，請稍後保存");
-        await CheckSiteAsync(request.SiteId);
         var documentType = await DictAsync(request.DocumentTypeDictId, "AccountingDocumentType");
         CheckModel(documentType.Value);
         var type = await DictAsync(request.Type, "Accounting");
         if (request.SiteCategoryDictId is { } siteCategory) await DictAsync(siteCategory, "AccountingSiteCategory");
-        // 必填規則與前端一致：地盤、票據類型、支出分類、導出地盤分類；日期、金額、幣種可稍後補
-        if (request.SiteCategoryDictId is null) throw new InvalidOperationException("請選擇導出地盤分類");
+        // 必填規則與前端一致：票據類型、支出分類、地盤分類；日期、金額、幣種可稍後補
+        if (request.SiteCategoryDictId is null) throw new InvalidOperationException("請選擇地盤分類");
         if (type.Value == "pending") throw new InvalidOperationException("請選擇實際支出分類，不能是「待分類」");
         if (request.Amount is <= 0) throw new InvalidOperationException("金額必須大於 0");
         if (request.Amount is > 9999999999999999.99m) throw new InvalidOperationException("金額過大");
@@ -141,7 +132,6 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
         if (request.MerchantName?.Length > 255 || request.InvoiceNumber?.Length > 100 || request.Remark?.Length > 255)
             throw new InvalidOperationException("商戶及備註最多 255 字，票據號碼最多 100 字");
         var modelChanged = receipt.DocumentTypeDictId != request.DocumentTypeDictId;
-        receipt.SiteId = request.SiteId;
         receipt.DocumentTypeDictId = documentType.Id;
         receipt.DocumentTypeDict = documentType;
         receipt.Type = type.Id;

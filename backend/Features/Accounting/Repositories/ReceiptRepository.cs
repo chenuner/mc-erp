@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MC.Erp.Features.Accounting.Repositories;
 
-public sealed record ReceiptFilter(Guid? SiteId = null, Guid? DocumentTypeDictId = null,
+public sealed record ReceiptFilter(Guid? DocumentTypeDictId = null,
     Guid? Type = null, Guid? SiteCategoryDictId = null, DateOnly? Start = null, DateOnly? End = null);
 
 public sealed class ReceiptRepository(ErpDbContext db, IHttpContextAccessor context)
@@ -14,11 +14,10 @@ public sealed class ReceiptRepository(ErpDbContext db, IHttpContextAccessor cont
     private IQueryable<Receipt> Query(ReceiptFilter filter) => db.Receipts
         .Include(receipt => receipt.FileItem)
         .Include(receipt => receipt.TypeDict)
-        .Include(receipt => receipt.Site).Include(receipt => receipt.DocumentTypeDict).Include(receipt => receipt.SiteCategoryDict)
+        .Include(receipt => receipt.DocumentTypeDict).Include(receipt => receipt.SiteCategoryDict)
         // 沒有原圖的手動票據也要列出；原圖被軟刪除的票據維持不列出
         .Where(receipt => receipt.FileItemId == null
             || (receipt.FileItem != null && receipt.FileItem.TypeDict != null && receipt.FileItem.TypeDict.GroupName == "Accounting"))
-        .Where(receipt => filter.SiteId == null || receipt.SiteId == filter.SiteId)
         .Where(receipt => filter.DocumentTypeDictId == null || receipt.DocumentTypeDictId == filter.DocumentTypeDictId)
         .Where(receipt => filter.Type == null || receipt.Type == filter.Type)
         .Where(receipt => filter.SiteCategoryDictId == null || receipt.SiteCategoryDictId == filter.SiteCategoryDictId)

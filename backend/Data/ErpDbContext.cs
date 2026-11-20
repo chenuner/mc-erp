@@ -47,11 +47,9 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
             entity.HasIndex(receipt => receipt.FileItemId).IsUnique();
             entity.HasIndex(receipt => receipt.ReceiptDate);
             entity.HasIndex(receipt => receipt.Type);
-            entity.HasIndex(receipt => new { receipt.SiteId, receipt.ReceiptDate });
             entity.HasIndex(receipt => new { receipt.SiteCategoryDictId, receipt.ReceiptDate });
             entity.HasOne(receipt => receipt.FileItem).WithOne().HasForeignKey<Receipt>(receipt => receipt.FileItemId)
                 .IsRequired(false).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne(receipt => receipt.Site).WithMany().HasForeignKey(receipt => receipt.SiteId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(receipt => receipt.DocumentTypeDict).WithMany().HasForeignKey(receipt => receipt.DocumentTypeDictId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(receipt => receipt.TypeDict).WithMany().HasForeignKey(receipt => receipt.Type).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(receipt => receipt.SiteCategoryDict).WithMany().HasForeignKey(receipt => receipt.SiteCategoryDictId).OnDelete(DeleteBehavior.Restrict);

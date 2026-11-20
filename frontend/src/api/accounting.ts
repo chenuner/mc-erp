@@ -8,8 +8,6 @@ export interface ReceiptDto {
   fileName: string | null
   md5: string | null
   sizeBytes: number | null
-  siteId: string
-  siteName: string
   documentTypeDictId: string
   documentTypeLabel: string
   type: string
@@ -43,7 +41,6 @@ export interface RecognizeResult {
 }
 
 export interface ReceiptQuery {
-  siteId?: string
   documentTypeDictId?: string
   type?: string
   siteCategoryDictId?: string
@@ -51,7 +48,7 @@ export interface ReceiptQuery {
   end?: string
 }
 
-export type UpdateReceipt = Pick<ReceiptDto, 'version' | 'siteId' | 'documentTypeDictId' | 'siteCategoryDictId'
+export type UpdateReceipt = Pick<ReceiptDto, 'version' | 'documentTypeDictId' | 'siteCategoryDictId'
   | 'receiptDate' | 'amount' | 'currencyCode' | 'merchantName' | 'invoiceNumber' | 'remark'> & { type: string }
 
 export async function accountingStatus(): Promise<{ ocrConfigured: boolean }> {
@@ -66,9 +63,9 @@ export async function getReceipt(id: string): Promise<ReceiptDto> {
   return await request.get(`/accounting/receipts/${id}`) as ReceiptDto
 }
 
-/** 建立草稿票據；原圖可稍後再補，不影響先填表。 */
-export async function createReceipt(siteId: string, documentTypeDictId: string): Promise<ReceiptDto> {
-  return await request.post('/accounting/receipts', { siteId, documentTypeDictId }) as ReceiptDto
+/** 建立草稿票據；原圖、地盤分類可稍後再補，不影響先填表。 */
+export async function createReceipt(documentTypeDictId: string): Promise<ReceiptDto> {
+  return await request.post('/accounting/receipts', { documentTypeDictId }) as ReceiptDto
 }
 
 /** 補上或更換票據原圖（JPEG / PNG，最多 4 MB）。 */
