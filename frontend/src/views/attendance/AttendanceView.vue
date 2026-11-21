@@ -276,8 +276,17 @@ const handwrittenLow = computed(() => {
 
 const cardFlaggedRows = computed(() => (cardDetail.value?.card.records ?? []).filter(row => row.needsReview).length)
 
-/** 有卡片層標記、或有時間欄需覆核，才顯示「標記為已核對」；時間欄仍標紅，請先改。 */
-const canConfirm = computed(() => (cardDetail.value?.card.reviewFields.length ?? 0) > 0)
+/** 被標記的行中，具體是哪幾欄（去重後的中文名），用在「標記為已核對」的確認文字裡。 */
+const cardFlaggedLabels = computed(() => {
+  const names = new Set<string>()
+  for (const row of cardDetail.value?.card.records ?? []) {
+    for (const field of row.reviewFields) names.add(cardLabels[field] ?? field)
+  }
+  return [...names].join('、')
+})
+
+/** 整張卡都乾淨（卡片層沒標記、每天的紅字也都處理過）→ 狀態「已識別」。 */
+const cardClean = computed(() => (cardDetail.value?.card.reviewFields.length ?? 0) === 0 && cardFlaggedRows.value === 0)
 
 const hasTime = (row: AttendanceRow) => cardTimeColumns.some(column => row[column.key].value)
 
@@ -651,22 +660,27 @@ async function saveCard() {
   finally { cardSaving.value = false }
 }
 
-/** 手動把卡片層複核標記清掉：狀態變「已識別」，時間欄一律不動。 */
+/** 手動把整張卡標記為已核對：卡片層標記清掉，日期欄的紅字也一併記成人工確認（值不改）。 */
 async function markChecked() {
   const detail = cardDetail.value
   if (!detail) return
-  const names = cardReviewText.value
+  const layers = cardReviewText.value
+  const rows = cardFlaggedRows.value
+  // 講清楚這次會放行什麼，避免「按一下全部變綠」卻不知道放過了甚麼
+  const parts = [
+    layers ? `卡片層：${layers}` : '',
+    rows ? `${rows} 天的時間欄紅字（${cardFlaggedLabels.value}）` : '',
+  ].filter(Boolean)
   try {
     await ElMessageBox.confirm(
-      `確認已對照原卡核對${names ? `「${names}」` : '整張卡'}？標記後狀態變「已識別」，時間欄不會被改動。`
-        + (cardFlaggedRows.value ? `\n另有 ${cardFlaggedRows.value} 天的時間欄置信度偏低，建議先雙擊核對。` : ''),
+      `確認已對照原卡核對整張卡？\n會把以下項目記成人工確認，狀態變「已識別」（時間和內容都不會改動）：\n${parts.map(part => `・${part}`).join('\n')}`,
       '標記為已核對', { confirmButtonText: '標記為已核對', cancelButtonText: '取消', type: 'warning' })
   } catch { return }
   cardSaving.value = true
   try {
     const updated = await confirmCardScan(detail.id)
     loadCard(updated)
-    ElMessage.success('已標記為已核對')
+    ElMessage.success('已標記為已核對，狀態改為已識別')
     await fetchRows()
   } catch { /* 已由攔截器提示 */ }
   finally { cardSaving.value = false }
@@ -836,9 +850,17 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
           <div v-if="handwrittenLow.length" class="card-note">
             <span class="card-note-label">手寫欄位置信度偏低（不算需覆核）：</span>{{ handwrittenLow.join('、') }}
           </div>
-          <div v-if="cardDetail.card.reviewFields.length" class="card-checked">
+          <div v-if="!cardClean" class="card-checked">
             <el-button :loading="cardSaving" @click="markChecked">標記為已核對</el-button>
-            <span class="card-note">對照原卡核對完後按此，狀態由「需覆核」變「已識別」；時間欄不會被改動。</span>
+            <span class="card-note">
+              對照原卡核對完整張卡後按此：狀態由「需覆核」變「已識別」
+              <template v-if="cardFlaggedRows">，並把 {{ cardFlaggedRows }} 天時間欄的紅字（{{ cardFlaggedLabels }}）記成人工確認</template>。
+              時間和內容都不會被改動。
+            </span>
+          </div>
+          <div v-else class="card-note">
+            <el-tag type="success" effect="plain" size="small">已識別</el-tag>
+            <span class="card-note-label">已核對完成，可以按「同步到打卡明細及薪酬表」。</span>
           </div>
           <el-descriptions class="card-meta" :column="3" border size="small">
             <el-descriptions-item label="年份（雙擊修改）">

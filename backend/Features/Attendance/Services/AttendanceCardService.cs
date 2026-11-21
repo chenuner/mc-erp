@@ -151,9 +151,9 @@ public sealed record UpdateCardPunch(
     string? OtOut);
 
 /// <summary>
-/// 把卡片層的複核標記清掉（人工已對照原卡核對）。時間欄本身沒有改動，
-/// 只影響卡片狀態：由「需覆核」變「已識別」。IncludeHandwritten 為 true 時連手寫的年月姓名一併判定，
-/// 留着低置信度就仍然需覆核。
+/// 把整張卡標記為已核對（人工對照原卡看過）：清掉卡片層複核標記，並把每列時間欄的置信度記成人工確認，
+/// 所以日期欄的紅字也一併放行，狀態由「需覆核」變「已識別」。時間值本身不改。
+/// IncludeHandwritten 為 true 時連手寫的年月姓名一併判定，留着低置信度就仍然需覆核。
 /// </summary>
 public sealed record ConfirmCardScanRequest(bool IncludeHandwritten = false);
 
@@ -253,8 +253,10 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
     }
 
     /// <summary>
-    /// 標記為已核對：清掉卡片層複核標記，時間欄原封不動。
-    /// 手寫的年月姓名本來就不算需覆核；勾了「一併檢查手寫欄位」時保留低置信度的那些。
+    /// 標記為已核對（人工已對照原卡確認整張卡）：卡片層複核標記清空，
+    /// 而且每一列時間欄的置信度一併記成人工確認（1），所以日期欄的紅字也一併放行——
+    /// 狀態由「需覆核」變「已識別」。時間本身的值完全不動。
+    /// <paramref name="IncludeHandwritten"/> 為 true 時仍會檢查手寫的年月姓名，低置信度的照樣保留需覆核。
     /// </summary>
     public async Task<AttendanceCardScanDto> ConfirmAsync(Guid id, ConfirmCardScanRequest request,
         CancellationToken ct = default)
@@ -267,10 +269,27 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
         scan.ReviewFields = request.IncludeHandwritten
             ? CardReviewRules.ReviewFieldsOf(scan, includeHandwritten: true)
             : [];
+        foreach (var punch in scan.Punches) ConfirmPunch(punch);
         scan.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         return AttendanceCardScanDto.From(scan);
     }
+
+    /// <summary>把一列明細裡「有時間但置信度低於閾值」的欄位記成人工確認；空欄不動。</summary>
+    private static void ConfirmPunch(AttendanceCardPunch punch)
+    {
+        (punch.AmIn, punch.AmInConfidence) = Confirmed(punch.AmIn, punch.AmInConfidence);
+        (punch.AmOut, punch.AmOutConfidence) = Confirmed(punch.AmOut, punch.AmOutConfidence);
+        (punch.PmIn, punch.PmInConfidence) = Confirmed(punch.PmIn, punch.PmInConfidence);
+        (punch.PmOut, punch.PmOutConfidence) = Confirmed(punch.PmOut, punch.PmOutConfidence);
+        (punch.OtIn, punch.OtInConfidence) = Confirmed(punch.OtIn, punch.OtInConfidence);
+        (punch.OtOut, punch.OtOutConfidence) = Confirmed(punch.OtOut, punch.OtOutConfidence);
+    }
+
+    private static (TimeOnly? Time, float? Confidence) Confirmed(TimeOnly? time, float? confidence) =>
+        time is not null && (confidence is not { } score || score < AzureDocumentOcrService.ConfidenceThreshold)
+            ? (time, 1f)
+            : (time, confidence);
 
     /// <summary>人工修正識別結果；只寫回真正改動的欄位，改過的欄位記為人工確認。</summary>
     public async Task<AttendanceCardScanDto> UpdateAsync(Guid id, UpdateCardScanRequest request,
