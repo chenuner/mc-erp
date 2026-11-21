@@ -34,14 +34,14 @@ public static class AttendanceEndpoints
         group.MapGet("/scans/{id:guid}", GetCardScanAsync).RequireAuthorization();
         group.MapPut("/scans/{id:guid}", UpdateCardScanAsync).RequireAuthorization("admin");
         group.MapDelete("/scans/{id:guid}", DeleteCardScanAsync).RequireAuthorization("admin");
+        // 同步：把識別結果導入打卡明細，並重算該員工該月的薪酬表
+        group.MapPost("/scans/{id:guid}/sync", SyncCardAsync).RequireAuthorization("admin");
 
         // 月結工數表
         group.MapGet("/summaries", GetSummariesAsync).RequireAuthorization();
         group.MapGet("/summaries/{workerId:guid}", GetWorkerSummaryAsync).RequireAuthorization();
 
-        // 操作
-        group.MapPost("/calculate", () => TypedResults.Problem(
-            "計薪規則尚未確認，暫不開放自動計算。", statusCode: StatusCodes.Status409Conflict)).RequireAuthorization("admin");
+        // 薪酬表（含人工迴寫）與模擬數據
         group.MapAttendanceTableEndpoints();
     }
 
@@ -131,6 +131,11 @@ public static class AttendanceEndpoints
         await svc.DeleteAsync(id, ct);
         return TypedResults.NoContent();
     }
+
+    /// <summary>把識別結果導入打卡明細（員工、地盤由使用者指定），並重算該員工該月的薪酬表。</summary>
+    private static async Task<Ok<CardSyncResultDto>> SyncCardAsync(
+        Guid id, SyncCardRequest request, AttendanceCardService svc, CancellationToken ct)
+        => TypedResults.Ok(await svc.SyncAsync(id, request, ct));
 
     // --- 月結 ---
     private static async Task<Ok<List<SummaryDto>>> GetSummariesAsync(

@@ -13,6 +13,29 @@ export async function listSites(): Promise<SiteDto[]> {
   return await request.get('/attendance/sites') as SiteDto[]
 }
 
+export interface WorkerDto {
+  id: string
+  name: string
+  employeeId: string | null
+  dailyWage: number
+  isActive: boolean
+}
+
+/** 考勤卡同步時選員工用；日薪就是計薪用的日薪。 */
+export async function listWorkers(): Promise<WorkerDto[]> {
+  return await request.get('/attendance/workers') as WorkerDto[]
+}
+
+/** 卡上手寫姓名對不上任何員工時，直接用該姓名建一個工人。 */
+export async function createWorker(payload: { name: string; employeeId?: string | null; dailyWage: number }): Promise<WorkerDto> {
+  return (await request.post('/attendance/workers', payload)) as WorkerDto
+}
+
+/** 改工人的日薪 / 啟用狀態；計薪用的是工人身上的日薪。 */
+export async function updateWorker(id: string, payload: { dailyWage?: number; isActive?: boolean }): Promise<WorkerDto> {
+  return (await request.put(`/attendance/workers/${id}`, payload)) as WorkerDto
+}
+
 export interface PayrollFields {
   workDays: number
   laborLeaveDays: number
@@ -169,4 +192,31 @@ export async function updateCardScan(id: string, payload: CardScanEdit): Promise
 
 export async function deleteCardScan(id: string): Promise<void> {
   await request.delete(`/attendance/scans/${id}`)
+}
+
+/** 同步結果：寫入幾筆打卡明細，以及重算後的薪酬表內容。 */
+export interface CardSyncResult {
+  scanId: string
+  year: number
+  month: number
+  workerId: string
+  workerName: string
+  siteId: string
+  siteName: string
+  addedRecords: number
+  workDays: number
+  laborLeaveDays: number
+  totalWorkDays: number
+  overtimeHours: number
+  dailyWage: number
+  overtimeAmount: number
+  mpfEmployer: number
+  mpfEmployee: number
+  actualPay: number
+  totalAmount: number
+}
+
+/** 把識別結果導入打卡明細（員工、地盤由使用者選），並重算該員工該月的薪酬表。 */
+export async function syncCardScan(id: string, payload: { workerId: string; siteId: string }): Promise<CardSyncResult> {
+  return (await request.post(`/attendance/scans/${id}/sync`, payload)) as CardSyncResult
 }

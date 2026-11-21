@@ -21,7 +21,7 @@ public sealed class AttendanceTableService(ErpDbContext db, IExternalAttendanceA
     public async Task<(List<AttendanceRecord> Items, int Total)> GetPunchesAsync(
         int year, int month, string? name, int page, int pageSize, CancellationToken ct)
     {
-        var (start, end) = MonthRange(year, month);
+        var (start, end) = AttendanceRules.MonthRange(year, month);
         var query = db.AttendanceRecords.AsNoTracking().Include(r => r.Worker).Include(r => r.Site)
             .Where(r => r.ClockInTime >= start && r.ClockInTime < end && !r.Worker.IsDeleted && !r.Site.IsDeleted);
         if (!string.IsNullOrWhiteSpace(name)) query = query.Where(r => r.Worker.Name.Contains(name.Trim()));
@@ -41,7 +41,7 @@ public sealed class AttendanceTableService(ErpDbContext db, IExternalAttendanceA
 
     public async Task<int> InitializeMockAsync(int year, int month, CancellationToken ct)
     {
-        var (start, end) = MonthRange(year, month);
+        var (start, end) = AttendanceRules.MonthRange(year, month);
         var source = await externalApi.FetchRecordsAsync(start, end, ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var added = 0;
@@ -88,9 +88,4 @@ public sealed class AttendanceTableService(ErpDbContext db, IExternalAttendanceA
         return added;
     }
 
-    private static (DateTime Start, DateTime End) MonthRange(int year, int month)
-    {
-        var start = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Utc).AddHours(-8);
-        return (start, new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(1).AddHours(-8));
-    }
 }
