@@ -39,8 +39,8 @@ internal static class IntegrationChecks
         start.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
         start.Environment["ConnectionStrings__Default"] = isolatedConnection;
         start.Environment["Storage__RootPath"] = temporaryRoot;
-        start.Environment["Ocr__Key"] = "";
-        start.Environment["Ocr__Endpoint"] = "";
+        start.Environment["AZURE_DOC_KEY"] = "";
+        start.Environment["AZURE_DOC_ENDPOINT"] = "";
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Cannot start backend");
         var standardOutput = process.StandardOutput.ReadToEndAsync();
         var standardError = process.StandardError.ReadToEndAsync();

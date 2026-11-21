@@ -29,6 +29,11 @@ jobs:
         run: dotnet restore backend/MC.Erp.csproj
 
       - name: Build backend
+        # OCR 憑據只在執行期讀取；CI 目前只建置不呼叫 Azure，這裡先映射好，
+        # 日後在本步之後加識別整合檢查時可直接使用。未配置 secret 時為空字串，不影響建置。
+        env:
+          AZURE_DOC_ENDPOINT: ${{ secrets.AZURE_DOC_ENDPOINT }}
+          AZURE_DOC_KEY: ${{ secrets.AZURE_DOC_KEY }}
         run: dotnet build backend/MC.Erp.csproj --configuration Release --no-restore
 
       - name: Publish backend

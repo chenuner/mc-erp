@@ -78,7 +78,7 @@ public sealed record ReceiptResponse(Guid Id, Guid Version, Guid? FileItemId, st
     Guid Type, string TypeLabel, Guid? SiteCategoryDictId, string? SiteCategoryLabel,
     DateOnly? ReceiptDate, decimal? Amount, string? CurrencyCode, string? MerchantName,
     string? InvoiceNumber, string? Remark, string OcrStatus, string? OcrError,
-    string? OcrText, JsonElement? OcrResult)
+    string? OcrText, OcrSuggestion? OcrResult)
 {
     public static ReceiptResponse From(Receipt receipt) => new(receipt.Id, receipt.Version,
         receipt.FileItemId, receipt.FileItem?.OriginalName, receipt.FileItem?.Md5, receipt.FileItem?.SizeBytes,
@@ -86,5 +86,17 @@ public sealed record ReceiptResponse(Guid Id, Guid Version, Guid? FileItemId, st
         receipt.Type, receipt.TypeDict.Label, receipt.SiteCategoryDictId, receipt.SiteCategoryDict?.Label,
         receipt.ReceiptDate, receipt.Amount, receipt.CurrencyCode, receipt.MerchantName,
         receipt.InvoiceNumber, receipt.Remark, receipt.OcrStatus, receipt.OcrError, receipt.OcrText,
-        receipt.OcrResultJson == null ? null : JsonSerializer.Deserialize<JsonElement>(receipt.OcrResultJson));
+        ReadSuggestion(receipt.OcrResultJson));
+
+    /// <summary>只回票據欄位。舊資料存的是 Azure 原始 JSON，解析不出欄位就當沒有，避免把整包原文回給前端。</summary>
+    private static OcrSuggestion? ReadSuggestion(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            var suggestion = JsonSerializer.Deserialize<OcrSuggestion>(json);
+            return suggestion?.ReviewFields is null ? null : suggestion;
+        }
+        catch (JsonException) { return null; }
+    }
 }
