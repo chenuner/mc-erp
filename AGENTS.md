@@ -53,10 +53,11 @@ MC ERP — 香港建築管理公司 ERP 系統。簡單系統，不過度工程�
 | 後端建置 | `dotnet build backend/MC.Erp.slnx` |
 | 身分檢查 | `dotnet run --project tests/Identity.Checks/Identity.Checks.csproj -c Release` |
 | 會計檢查 | `dotnet run --project tests/Accounting.Checks/Accounting.Checks.csproj -c Release` |
+| 考勤檢查 | `dotnet run --project tests/Attendance.Checks/Attendance.Checks.csproj -c Release` |
 | 整合檢查（需資料庫） | `dotnet run --project tests/Accounting.Checks/Accounting.Checks.csproj -c Release -- --integration` |
 | 前端型別 + 建置 | `pnpm -C frontend run build` |
 
-> 兩個 Checks 共用 `backend` 的 Release 輸出，**不可並行**，否則 CS2012。
+> 三個 Checks 共用 `backend` 的 Release 輸出，**不可並行**，否則 CS2012。
 >
 > CI 只做建置與打包，不跑 Checks；本地以本表為準。
 

@@ -21,6 +21,8 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
     public DbSet<Site> Sites => Set<Site>();
     public DbSet<AttendanceRecord> AttendanceRecords => Set<AttendanceRecord>();
     public DbSet<MonthlyWorkSummary> MonthlyWorkSummaries => Set<MonthlyWorkSummary>();
+    public DbSet<AttendanceCardScan> AttendanceCardScans => Set<AttendanceCardScan>();
+    public DbSet<AttendanceCardPunch> AttendanceCardPunches => Set<AttendanceCardPunch>();
 
     // System（系統級字典及其他系統配置）
     public DbSet<SysDict> SysDicts => Set<SysDict>();
@@ -147,6 +149,32 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
             e.Property(s => s.TotalAmount).HasPrecision(18, 2);
             e.Property(s => s.Remark).HasMaxLength(255);
             e.HasIndex(s => new { s.WorkerId, s.Year, s.Month }).IsUnique();
+        });
+
+        // 考勤卡掃描：欄位對應識別結果，工時不落庫；原圖走 storage_files，一筆掃描對應一張原圖
+        modelBuilder.Entity<AttendanceCardScan>(e =>
+        {
+            e.ToTable("attendance_card_scans");
+            e.HasQueryFilter(scan => !scan.IsDeleted);
+            e.Property(scan => scan.Name).HasMaxLength(50);
+            e.HasIndex(scan => new { scan.Year, scan.Month });
+            e.HasIndex(scan => scan.FileItemId).IsUnique();
+            e.HasMany(scan => scan.Punches)
+                .WithOne(punch => punch.Scan)
+                .HasForeignKey(punch => punch.ScanId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(scan => scan.FileItem)
+                .WithOne()
+                .HasForeignKey<AttendanceCardScan>(scan => scan.FileItemId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AttendanceCardPunch>(e =>
+        {
+            e.ToTable("attendance_card_punches");
+            // 一張卡同一天只會有一列，重複保存即為資料錯誤
+            e.HasIndex(punch => new { punch.ScanId, punch.Day }).IsUnique();
         });
 
         // System 模塊：字典分組
