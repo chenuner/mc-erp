@@ -73,7 +73,8 @@ public sealed record UpdateCardScanRequest(
     [Range(2000, 2099)] int? Year,
     [Range(1, 12)] int? Month,
     [MaxLength(50)] string? Name,
-    List<UpdateCardPunch> Records)
+    List<UpdateCardPunch> Records,
+    bool IncludeHandwritten = false)
 {
     /// <summary>人工確認過的欄位記 1，與識別置信度區分開。</summary>
     private const float Manual = 1f;
@@ -81,6 +82,8 @@ public sealed record UpdateCardScanRequest(
     /// <summary>
     /// 套用到已保存的掃描：只覆寫真正改動的欄位，改過的當作人工確認（置信度 1），
     /// 沒改的保留原本識別置信度——所以核對過的低置信度欄位才會從「需覆核」消失。
+    /// <paramref name="IncludeHandwritten"/> 為 true 時（標記為已核對並一併檢查手寫欄位），
+    /// 年份 / 月份 / 姓名也一起重新判定，使用者可以一次把整張卡核對完。
     /// </summary>
     public void ApplyTo(AttendanceCardScan scan)
     {
@@ -101,7 +104,7 @@ public sealed record UpdateCardScanRequest(
             scan.NameConfidence = Confidence(name);
         }
         foreach (var edit in Records) Apply(scan, edit);
-        scan.ReviewFields = ReviewFieldsOf(scan);
+        scan.ReviewFields = CardReviewRules.ReviewFieldsOf(scan, IncludeHandwritten);
     }
 
     private static void Apply(AttendanceCardScan scan, UpdateCardPunch edit)
@@ -135,21 +138,6 @@ public sealed record UpdateCardScanRequest(
             : throw new InvalidOperationException($"「{text.Trim()}」不是 HH:mm 格式的時間");
 
     private static float? Confidence<T>(T value) => value is null ? null : Manual;
-
-    /// <summary>重算卡級複核標記；layout（表頭漏檢）推不回來，原樣保留。</summary>
-    private static List<string> ReviewFieldsOf(AttendanceCardScan scan)
-    {
-        var fields = new List<string>();
-        if (scan.ReviewFields.Contains("layout")) fields.Add("layout");
-        if (Unconfirmed(scan.Year, scan.YearConfidence)) fields.Add("year");
-        if (Unconfirmed(scan.Month, scan.MonthConfidence)) fields.Add("month");
-        if (Unconfirmed(scan.Name, scan.NameConfidence)) fields.Add("name");
-        return fields;
-    }
-
-    /// <summary>沒讀到值，或讀到值但置信度低於閾值，都要人工核對（與識別時同一條規則）。</summary>
-    private static bool Unconfirmed<T>(T value, float? confidence) =>
-        value is null || confidence is not { } score || score < AzureDocumentOcrService.ConfidenceThreshold;
 }
 
 /// <summary>單日打卡修正，六個時間都可留空。</summary>
@@ -161,6 +149,37 @@ public sealed record UpdateCardPunch(
     string? PmOut,
     string? OtIn,
     string? OtOut);
+
+/// <summary>
+/// 把卡片層的複核標記清掉（人工已對照原卡核對）。時間欄本身沒有改動，
+/// 只影響卡片狀態：由「需覆核」變「已識別」。IncludeHandwritten 為 true 時連手寫的年月姓名一併判定，
+/// 留着低置信度就仍然需覆核。
+/// </summary>
+public sealed record ConfirmCardScanRequest(bool IncludeHandwritten = false);
+
+/// <summary>
+/// 手寫欄位（年份 / 月份 / 姓名）預設不列入卡片層複核：它們的置信度普遍在 0.6–0.75，
+/// 用印刷體的 0.80 去卡，每張卡都會一直掛「需覆核」。需要嚴格把關時用 <see cref="ConfirmCardScanRequest.IncludeHandwritten"/>
+/// 或 <see cref="UpdateCardScanRequest.IncludeHandwritten"/> 把它們拉回複核。
+/// </summary>
+public static class CardReviewRules
+{
+    /// <summary>重算卡級複核標記；layout（表頭漏檢）推不回來，原樣保留。</summary>
+    public static List<string> ReviewFieldsOf(AttendanceCardScan scan, bool includeHandwritten)
+    {
+        var fields = new List<string>();
+        if (scan.ReviewFields.Contains("layout")) fields.Add("layout");
+        if (!includeHandwritten) return fields;
+        if (Unconfirmed(scan.Year, scan.YearConfidence)) fields.Add("year");
+        if (Unconfirmed(scan.Month, scan.MonthConfidence)) fields.Add("month");
+        if (Unconfirmed(scan.Name, scan.NameConfidence)) fields.Add("name");
+        return fields;
+    }
+
+    /// <summary>沒讀到值，或讀到值但置信度低於閾值，都要人工核對（與識別時同一條規則）。</summary>
+    private static bool Unconfirmed<T>(T value, float? confidence) =>
+        value is null || confidence is not { } score || score < AzureDocumentOcrService.ConfidenceThreshold;
+}
 
 /// <summary>同步到打卡明細的目標：哪個員工、哪個地盤（卡上只有手寫姓名，由使用者自己配對）。</summary>
 public sealed record SyncCardRequest(Guid WorkerId, Guid SiteId);
@@ -230,6 +249,26 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
             .Include(item => item.FileItem)
             .FirstOrDefaultAsync(item => item.Id == id, ct)
             ?? throw new KeyNotFoundException("考勤卡掃描記錄不存在");
+        return AttendanceCardScanDto.From(scan);
+    }
+
+    /// <summary>
+    /// 標記為已核對：清掉卡片層複核標記，時間欄原封不動。
+    /// 手寫的年月姓名本來就不算需覆核；勾了「一併檢查手寫欄位」時保留低置信度的那些。
+    /// </summary>
+    public async Task<AttendanceCardScanDto> ConfirmAsync(Guid id, ConfirmCardScanRequest request,
+        CancellationToken ct = default)
+    {
+        var scan = await db.AttendanceCardScans
+            .Include(item => item.Punches)
+            .Include(item => item.FileItem)
+            .FirstOrDefaultAsync(item => item.Id == id, ct)
+            ?? throw new KeyNotFoundException("考勤卡掃描記錄不存在");
+        scan.ReviewFields = request.IncludeHandwritten
+            ? CardReviewRules.ReviewFieldsOf(scan, includeHandwritten: true)
+            : [];
+        scan.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
         return AttendanceCardScanDto.From(scan);
     }
 

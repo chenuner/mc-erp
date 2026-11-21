@@ -31,9 +31,14 @@ export async function createWorker(payload: { name: string; employeeId?: string 
   return (await request.post('/attendance/workers', payload)) as WorkerDto
 }
 
-/** 改工人的日薪 / 啟用狀態；計薪用的是工人身上的日薪。 */
-export async function updateWorker(id: string, payload: { dailyWage?: number; isActive?: boolean }): Promise<WorkerDto> {
+/** 改員工的姓名 / 工號 / 日薪 / 在職；只送有改的欄位。 */
+export async function updateWorker(id: string, payload: { name?: string; employeeId?: string | null; dailyWage?: number; isActive?: boolean }): Promise<WorkerDto> {
   return (await request.put(`/attendance/workers/${id}`, payload)) as WorkerDto
+}
+
+/** 刪除員工（軟刪除）：已入庫的打卡明細和薪酬保留，只是不再顯示。 */
+export async function deleteWorker(id: string): Promise<void> {
+  await request.delete(`/attendance/workers/${id}`)
 }
 
 export interface PayrollFields {
@@ -78,7 +83,8 @@ export interface PunchDto extends PunchFields {
 export interface AttendanceQuery {
   year: number
   month: number
-  name?: string
+  /** 只看某個員工；不填就是全部（姓名下拉選的是員工 id，重名不會混）。 */
+  workerId?: string
   page: number
   pageSize: number
 }
@@ -188,6 +194,14 @@ export async function getCardScan(id: string): Promise<AttendanceCardScanDto> {
 /** 人工修正識別結果（年月、姓名、每日時間），回傳修正後的完整掃描。 */
 export async function updateCardScan(id: string, payload: CardScanEdit): Promise<AttendanceCardScanDto> {
   return (await request.put(`/attendance/scans/${id}`, payload)) as AttendanceCardScanDto
+}
+
+/**
+ * 標記為已核對：清掉卡片層複核標記，狀態由「需覆核」變「已識別」，時間欄不改。
+ * includeHandwritten 為 true 時連手寫的年月姓名一併判定（低置信度仍會保留需覆核）。
+ */
+export async function confirmCardScan(id: string, includeHandwritten = false): Promise<AttendanceCardScanDto> {
+  return (await request.post(`/attendance/scans/${id}/confirm`, { includeHandwritten })) as AttendanceCardScanDto
 }
 
 export async function deleteCardScan(id: string): Promise<void> {

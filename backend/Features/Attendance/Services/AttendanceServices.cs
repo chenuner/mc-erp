@@ -18,14 +18,26 @@ public sealed class AttendanceServices(IAttendanceRepository repo)
         return worker;
     }
 
-    public async Task<Worker?> UpdateWorkerAsync(Guid id, decimal? dailyWage, bool? isActive, CancellationToken ct = default)
+    public async Task<Worker?> UpdateWorkerAsync(Guid id, string? name, string? employeeId, decimal? dailyWage, bool? isActive, CancellationToken ct = default)
     {
         var worker = await repo.GetWorkerByIdAsync(id, ct);
         if (worker is null) return null;
+        // 只改有給的欄位；姓名不允許改成空白，工號給空字串代表清空
+        if (!string.IsNullOrWhiteSpace(name)) worker.Name = name.Trim();
+        if (employeeId is not null) worker.EmployeeId = string.IsNullOrWhiteSpace(employeeId) ? null : employeeId.Trim();
         if (dailyWage is not null) worker.DailyWage = dailyWage.Value;
         if (isActive is not null) worker.IsActive = isActive.Value;
         await repo.UpdateWorkerAsync(worker, ct);
         return worker;
+    }
+
+    public async Task DeleteWorkerAsync(Guid id, CancellationToken ct = default)
+    {
+        var worker = await repo.GetWorkerByIdAsync(id, ct) ?? throw new KeyNotFoundException("員工不存在");
+        // 軟刪除：已入庫的打卡明細和薪酬表保留，只是列表、下拉和薪酬查詢都不再顯示
+        worker.IsDeleted = true;
+        worker.DeletedAt = DateTime.UtcNow;
+        await repo.UpdateWorkerAsync(worker, ct);
     }
 
     public Task<List<Site>> GetSitesAsync(CancellationToken ct = default)

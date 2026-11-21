@@ -4,8 +4,9 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 import AppIcon from '@/components/AppIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import {
-  createWorker, deleteCardScan, getCardScan, initializeAttendanceMock, listCardScans, listPayroll, listPunches,
-  listSites, listWorkers, scanAttendanceCard, syncCardScan, updateCardScan, updatePayroll, updatePunch, updateWorker,
+  confirmCardScan, createWorker, deleteCardScan, deleteWorker, getCardScan, initializeAttendanceMock, listCardScans,
+  listPayroll, listPunches, listSites, listWorkers, scanAttendanceCard, syncCardScan, updateCardScan, updatePayroll,
+  updatePunch, updateWorker,
   type AttendanceCardScanDto, type AttendanceCardScanSummaryDto, type AttendanceRow, type PayrollDto,
   type PayrollFields, type PunchDto, type SiteDto, type WorkerDto,
 } from '@/api/attendance'
@@ -30,8 +31,7 @@ const isAdmin = computed(() => auth.roles.includes('Admin'))
 const activeTab = ref<'payroll' | 'punches' | 'cards'>('payroll')
 const now = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Hong_Kong', year: 'numeric', month: '2-digit' }).formatToParts(new Date())
 const month = ref(`${now.find(part => part.type === 'year')?.value}-${now.find(part => part.type === 'month')?.value}`)
-const keyword = ref('')
-const nameFilter = ref('')
+const workerFilter = ref('')
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
@@ -73,7 +73,7 @@ async function fetchRows() {
       cards.value = result.items
       total.value = result.total
     } else {
-      const params = { ...selectedMonth(), name: nameFilter.value || undefined, page: page.value, pageSize: pageSize.value }
+      const params = { ...selectedMonth(), workerId: workerFilter.value || undefined, page: page.value, pageSize: pageSize.value }
       if (activeTab.value === 'payroll') {
         const result = await listPayroll(params)
         if (id !== requestId) return
@@ -99,8 +99,8 @@ async function fetchRows() {
   }
 }
 
+/** 姓名下拉／查詢按鈕都走這裡；回到第一頁時由 page 的 watch 觸發查詢。 */
 function search() {
-  nameFilter.value = keyword.value.trim()
   if (page.value !== 1) page.value = 1
   else fetchRows()
 }
@@ -114,7 +114,11 @@ watch([month, activeTab, pageSize], () => {
   else fetchRows()
 })
 watch(page, fetchRows)
-onMounted(fetchRows)
+onMounted(() => {
+  // 姓名篩選和同步的員工下拉都要員工清單，先載入（失敗不影響列表查詢）
+  void ensureOptions()
+  return fetchRows()
+})
 
 async function initializeMock() {
   try {
@@ -255,6 +259,25 @@ const cardLabels: Record<string, string> = {
 
 const cardReviewText = computed(() =>
   (cardDetail.value?.card.reviewFields ?? []).map(name => cardLabels[name] ?? name).join('、'))
+
+/** 手寫欄位（年月姓名）本身不算需覆核，但置信度低仍值得提示——不影響卡片狀態。 */
+const handwrittenLow = computed(() => {
+  const card = cardDetail.value?.card
+  if (!card) return []
+  const fields: { key: 'year' | 'month' | 'name'; label: string; text: string }[] = [
+    { key: 'year', label: '年份', text: card.year.value == null ? '未識別' : String(card.year.value) },
+    { key: 'month', label: '月份', text: card.month.value == null ? '未識別' : String(card.month.value) },
+    { key: 'name', label: '姓名', text: card.name.value || '未識別' },
+  ]
+  return fields
+    .filter(field => lowConfidence(card[field.key]))
+    .map(field => `${field.label}「${field.text}」${percent(card[field.key])}`)
+})
+
+const cardFlaggedRows = computed(() => (cardDetail.value?.card.records ?? []).filter(row => row.needsReview).length)
+
+/** 有卡片層標記、或有時間欄需覆核，才顯示「標記為已核對」；時間欄仍標紅，請先改。 */
+const canConfirm = computed(() => (cardDetail.value?.card.reviewFields.length ?? 0) > 0)
 
 const hasTime = (row: AttendanceRow) => cardTimeColumns.some(column => row[column.key].value)
 
@@ -432,6 +455,103 @@ async function createWorkerFromCard() {
   } catch { /* 已由攔截器提示 */ }
 }
 
+/** 員工管理：姓名、工號、日薪、在職。日薪是計薪基礎，所以在這裡維護而不是散在薪酬表。 */
+const workerDialog = ref(false)
+const workerEditDialog = ref(false)
+const workerRows = ref<WorkerDto[]>([])
+const workerLoading = ref(false)
+const workerSaving = ref(false)
+const workerForm = reactive({ id: '', name: '', employeeId: '', dailyWage: 0, isActive: true })
+
+function resetWorkerForm() {
+  workerForm.id = ''
+  workerForm.name = ''
+  workerForm.employeeId = ''
+  workerForm.dailyWage = 0
+  workerForm.isActive = true
+}
+
+async function openWorkers() {
+  workerDialog.value = true
+  await reloadWorkers()
+}
+
+/** 新增：清空表單再開編輯框。 */
+function startCreateWorker() {
+  resetWorkerForm()
+  workerEditDialog.value = true
+}
+
+/** 重新載入員工清單；同步選單和姓名篩選用的 workers 也一起更新。 */
+async function reloadWorkers() {
+  workerLoading.value = true
+  try {
+    workerRows.value = await listWorkers()
+    workers.value = workerRows.value
+  } catch {
+    workerRows.value = []
+  } finally {
+    workerLoading.value = false
+  }
+}
+
+/** 編輯：帶出該員工的資料，改完按保存才寫回。 */
+function editWorker(row: WorkerDto) {
+  workerForm.id = row.id
+  workerForm.name = row.name
+  workerForm.employeeId = row.employeeId ?? ''
+  workerForm.dailyWage = row.dailyWage
+  workerForm.isActive = row.isActive
+  workerEditDialog.value = true
+}
+
+async function saveWorker() {
+  const name = workerForm.name.trim()
+  if (!name) {
+    ElMessage.warning('請輸入姓名')
+    return
+  }
+  workerSaving.value = true
+  try {
+    if (workerForm.id) {
+      await updateWorker(workerForm.id, {
+        name, employeeId: workerForm.employeeId.trim(), dailyWage: workerForm.dailyWage, isActive: workerForm.isActive,
+      })
+      ElMessage.success('員工已更新')
+    } else {
+      await createWorker({ name, employeeId: workerForm.employeeId.trim() || null, dailyWage: workerForm.dailyWage })
+      ElMessage.success(`已新增員工 ${name}`)
+    }
+    workerEditDialog.value = false
+    resetWorkerForm()
+    await reloadWorkers()
+  } catch { /* 已由攔截器提示 */ }
+  finally { workerSaving.value = false }
+}
+
+/** 停用／啟用：只是不在同步下拉裡出現，資料和薪酬查詢都保留。 */
+async function toggleWorker(row: WorkerDto) {
+  try {
+    await updateWorker(row.id, { isActive: !row.isActive })
+    ElMessage.success(row.isActive ? `已停用 ${row.name}` : `已啟用 ${row.name}`)
+    await reloadWorkers()
+  } catch { /* 已由攔截器提示 */ }
+}
+
+/** 刪除：軟刪除，連薪酬表和打卡明細都不再顯示；記錄仍留在庫裡。 */
+async function removeWorker(row: WorkerDto) {
+  try {
+    await ElMessageBox.confirm(
+      `刪除員工「${row.name}」？刪除後他的薪酬表和打卡明細都不再顯示（資料仍在庫裡），也不能復原；只想暫時隱藏請用「停用」。`,
+      '刪除員工', { confirmButtonText: '刪除', cancelButtonText: '取消', type: 'warning' })
+  } catch { return }
+  try {
+    await deleteWorker(row.id)
+    ElMessage.success(`已刪除 ${row.name}`)
+    await reloadWorkers()
+  } catch { /* 已由攔截器提示 */ }
+}
+
 /** 同步：導入打卡明細並重算該員工該月薪酬，完成後切到薪酬表看結果。 */
 async function syncCard() {
   const detail = cardDetail.value
@@ -531,6 +651,27 @@ async function saveCard() {
   finally { cardSaving.value = false }
 }
 
+/** 手動把卡片層複核標記清掉：狀態變「已識別」，時間欄一律不動。 */
+async function markChecked() {
+  const detail = cardDetail.value
+  if (!detail) return
+  const names = cardReviewText.value
+  try {
+    await ElMessageBox.confirm(
+      `確認已對照原卡核對${names ? `「${names}」` : '整張卡'}？標記後狀態變「已識別」，時間欄不會被改動。`
+        + (cardFlaggedRows.value ? `\n另有 ${cardFlaggedRows.value} 天的時間欄置信度偏低，建議先雙擊核對。` : ''),
+      '標記為已核對', { confirmButtonText: '標記為已核對', cancelButtonText: '取消', type: 'warning' })
+  } catch { return }
+  cardSaving.value = true
+  try {
+    const updated = await confirmCardScan(detail.id)
+    loadCard(updated)
+    ElMessage.success('已標記為已核對')
+    await fetchRows()
+  } catch { /* 已由攔截器提示 */ }
+  finally { cardSaving.value = false }
+}
+
 function closeCard() {
   cardDetail.value = null
   cardDraft.value = null
@@ -569,6 +710,9 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
         <el-button @click="initializeMock">
           <AppIcon name="plus" :size="16" class="button-icon" />初始化模擬數據
         </el-button>
+        <el-button v-if="isAdmin" @click="openWorkers">
+          <AppIcon name="users" :size="16" class="button-icon" />員工管理
+        </el-button>
       </div>
       <input ref="cameraInput" class="file-input" type="file" accept="image/jpeg,image/png" capture="environment" @change="pickCard" />
       <input ref="albumInput" class="file-input" type="file" accept="image/jpeg,image/png" @change="pickCard" />
@@ -588,8 +732,10 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
       </div>
       <div class="filter-field">
         <label for="attendance-name">姓名</label>
-        <el-input id="attendance-name" v-model="keyword" clearable maxlength="100" :disabled="activeTab === 'cards'"
-          :placeholder="activeTab === 'cards' ? '考勤卡按年月篩選' : ''" @clear="search" />
+        <el-select id="attendance-name" v-model="workerFilter" filterable clearable :disabled="activeTab === 'cards'"
+          :placeholder="activeTab === 'cards' ? '考勤卡按年月篩選' : '全部員工'" @change="search">
+          <el-option v-for="worker in workers" :key="worker.id" :label="worker.name" :value="worker.id" />
+        </el-select>
       </div>
       <el-button type="primary" native-type="submit"><AppIcon name="search" :size="16" class="button-icon" />查詢</el-button>
       <el-tooltip content="刷新" placement="top">
@@ -687,6 +833,13 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
             description="上傳時已自動保存。雙擊年月、姓名或任何時間即可修正，改完按「保存修改」；沒按保存就關閉不會影響已保存的內容。" />
           <el-alert v-if="cardDetail.card.reviewFields.length" :title="`需人工複核：${cardReviewText}（手寫內容識別率有限，請對照原卡核對）`"
             type="warning" :closable="false" show-icon />
+          <div v-if="handwrittenLow.length" class="card-note">
+            <span class="card-note-label">手寫欄位置信度偏低（不算需覆核）：</span>{{ handwrittenLow.join('、') }}
+          </div>
+          <div v-if="cardDetail.card.reviewFields.length" class="card-checked">
+            <el-button :loading="cardSaving" @click="markChecked">標記為已核對</el-button>
+            <span class="card-note">對照原卡核對完後按此，狀態由「需覆核」變「已識別」；時間欄不會被改動。</span>
+          </div>
           <el-descriptions class="card-meta" :column="3" border size="small">
             <el-descriptions-item label="年份（雙擊修改）">
               <el-input v-if="editingKey === 'year'" :ref="bindEditor" v-model="editingText" size="small" class="card-editor"
@@ -766,6 +919,64 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
       </template>
     </el-dialog>
 
+    <el-dialog v-model="workerDialog" title="員工管理" width="min(820px, calc(100vw - 32px))" class="attendance-dialog">
+      <div class="worker-toolbar">
+        <span class="worker-toolbar-hint">姓名、工號、日薪都在這裡維護；日薪是計薪基礎（O.T. 時薪＝日薪÷8×1.5）。</span>
+        <el-button type="primary" @click="startCreateWorker">
+          <AppIcon name="plus" :size="16" class="button-icon" />新增員工
+        </el-button>
+      </div>
+      <el-table v-loading="workerLoading" :data="workerRows" stripe size="small" max-height="380" row-key="id">
+        <el-table-column prop="name" label="姓名" min-width="110" show-overflow-tooltip />
+        <el-table-column label="工號" width="120">
+          <template #default="{ row }">{{ row.employeeId || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="日薪（HK$）" width="120" align="right">
+          <template #default="{ row }"><span class="num">{{ moneyFormatter.format(row.dailyWage) }}</span></template>
+        </el-table-column>
+        <el-table-column label="狀態" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.isActive ? 'success' : 'info'" effect="plain">{{ row.isActive ? '在職' : '停用' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="200" align="center">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="editWorker(row)">編輯</el-button>
+            <el-button link :type="row.isActive ? 'warning' : 'success'" @click="toggleWorker(row)">{{ row.isActive ? '停用' : '啟用' }}</el-button>
+            <el-button link type="danger" @click="removeWorker(row)">刪除</el-button>
+          </template>
+        </el-table-column>
+        <template #empty><el-empty description="還沒有員工，按右上角「新增員工」" :image-size="64" /></template>
+      </el-table>
+      <p class="card-hint">停用＝暫時不出現在同步的員工下拉，薪酬查詢照舊看得到；刪除＝軟刪除，薪酬表和打卡明細都不再顯示（記錄仍在庫裡）。</p>
+    </el-dialog>
+
+    <el-dialog v-model="workerEditDialog" :title="workerForm.id ? '編輯員工' : '新增員工'"
+      width="min(560px, calc(100vw - 32px))" class="attendance-dialog" :close-on-click-modal="false"
+      @closed="resetWorkerForm">
+      <el-form label-position="top" @submit.prevent>
+        <div class="worker-form-row">
+          <el-form-item label="姓名" required>
+            <el-input v-model="workerForm.name" maxlength="50" placeholder="例：陳大文" :disabled="workerSaving" />
+          </el-form-item>
+          <el-form-item label="工號">
+            <el-input v-model="workerForm.employeeId" maxlength="50" placeholder="選填" :disabled="workerSaving" />
+          </el-form-item>
+          <el-form-item label="日薪（HK$）" required>
+            <el-input-number v-model="workerForm.dailyWage" :precision="2" :step="50" :min="0" :max="999999.99"
+              controls-position="right" :disabled="workerSaving" />
+          </el-form-item>
+          <el-form-item label="在職">
+            <el-switch v-model="workerForm.isActive" :disabled="workerSaving" />
+          </el-form-item>
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button :disabled="workerSaving" @click="workerEditDialog = false">取消</el-button>
+        <el-button type="primary" :loading="workerSaving" @click="saveWorker">{{ workerForm.id ? '保存修改' : '新增' }}</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="payrollDialog" :title="`編輯薪酬 · ${editingName}`" width="640px" class="attendance-dialog"
       :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving" @closed="payrollFormRef?.clearValidate()">
       <el-form ref="payrollFormRef" :model="payrollForm" :rules="payrollRules" label-position="top">
@@ -814,6 +1025,14 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
 .card-sync-fields { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .card-sync-field { width: 240px; }
 .card-sync-note { font-size: 12px; color: var(--el-color-warning); }
+.card-note { margin: 8px 0; font-size: 12px; line-height: 1.6; color: var(--el-text-color-secondary); }
+.card-note-label { color: var(--el-color-warning); }
+.card-checked { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.card-checked .card-note { margin: 0; }
+.worker-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.worker-toolbar-hint { font-size: 12px; color: var(--el-text-color-secondary); }
+.worker-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; }
+.worker-form-row :deep(.el-input-number) { width: 100%; }
 .option-note { margin-left: 16px; font-size: 12px; color: var(--el-text-color-secondary); }
 .card-editable { display: inline-block; min-width: 44px; padding: 1px 4px; border-radius: 4px; cursor: pointer; }
 .card-editable:hover { background: var(--el-fill-color-light); box-shadow: inset 0 0 0 1px var(--el-border-color); }
@@ -824,6 +1043,7 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
 .filter-field { display: flex; flex-direction: column; gap: 8px; width: 220px; max-width: 100%; }
 .filter-field label { color: var(--mc-text-secondary); font-size: 13px; }
 .filter-field :deep(.el-date-editor) { width: 100%; }
+.filter-field :deep(.el-select) { width: 100%; }
 .table-region { min-width: 0; background: var(--mc-card-bg, var(--el-bg-color)); border-top: 1px solid var(--el-border-color); }
 .num { font-variant-numeric: tabular-nums; }
 .pagination { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 16px 0; }

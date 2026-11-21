@@ -59,9 +59,9 @@ Check(full.Records[0] is { PmIn.Value: null, PmOut.Value: null, OtIn.Value: null
     "Blank cells stay null instead of defaulting");
 Check(full.Year.Value == 2026 && full.Month.Value == 10, "Handwritten year and month are read from the text");
 Check(full.Name.Value == "朱駿豪", "Handwritten name is read after the 姓名 label");
-Check(full.ReviewFields.SequenceEqual(["year", "month", "name"]),
-    "Handwritten fields with no word confidence need review");
-Check(full.NeedsReview, "Low confidence anywhere marks the card as needing review");
+Check(full.ReviewFields.Count == 0,
+    "Handwritten fields no longer hold the card in review (confidence still reported per field)");
+Check(full.NeedsReview, "A low-confidence printed time still flags the card, and its row");
 
 // 一個格子裡出現兩個時間，代表它橫跨上班 / 下班兩欄
 var merged = Parse(Card("日期 上午 下午 05 0509:07 0517:05",
@@ -200,8 +200,8 @@ new UpdateCardScanRequest(2026, 10, "朱駿豪",
     [new UpdateCardPunch(5, "09:10", "17:05", null, null, null, null)]).ApplyTo(corrected);
 Check(corrected is { Month: 10, MonthConfidence: 1f }, "A corrected month is stored as manually confirmed");
 Check(corrected is { YearConfidence: 0.4f, NameConfidence: 0.9f }, "Untouched fields keep their OCR confidence");
-Check(corrected.ReviewFields.SequenceEqual(["layout", "year"]),
-    "Corrected fields drop out of review, layout stays because it cannot be recomputed");
+Check(corrected.ReviewFields.SequenceEqual(["layout"]),
+    "Handwritten year/month/name never hold the card in review; layout stays because it cannot be recomputed");
 Check(corrected.Punches[0] is { AmInConfidence: 1f } && corrected.Punches[0].AmIn == new TimeOnly(9, 10),
     "A corrected time is stored as manually confirmed");
 Check(corrected.Punches[0].AmOut == new TimeOnly(17, 5), "A new time fills the empty column of that day");
@@ -216,8 +216,28 @@ Check(corrected.Punches[0] is { AmIn: null, AmInConfidence: null }, "An empty ti
 Check(corrected.Punches[1] is { Day: 6 } && corrected.Punches[1].AmIn == new TimeOnly(8, 0),
     "A day that was not on the scan can be added by hand");
 Check(corrected is { Name: null, NameConfidence: null }, "An empty name is cleared instead of stored as an empty string");
-Check(corrected.ReviewFields.SequenceEqual(["layout", "year", "name"]),
-    "A cleared field goes back to needing review");
+Check(corrected.ReviewFields.SequenceEqual(["layout"]),
+    "A cleared handwritten field is not treated as needing review either");
+
+// 勾了「一併檢查手寫欄位」才把低置信度、漏讀的手寫欄拉回複核
+var strict = new AttendanceCardScan
+{
+    Year = 2026, YearConfidence = 0.4f, Month = 10, MonthConfidence = 1f,
+    Name = "朱駿豪", NameConfidence = 0.7f, ReviewFields = ["layout"]
+};
+Check(UpdateCardScanRequest.ReviewFieldsOf(strict, includeHandwritten: true).SequenceEqual(["layout", "year", "name"]),
+    "Asking to include handwritten fields puts the low-confidence ones back in review");
+Check(UpdateCardScanRequest.ReviewFieldsOf(strict, includeHandwritten: false).SequenceEqual(["layout"]),
+    "By default handwritten fields stay out of review");
+
+// 人工標記為已核對：卡片層標記清空，時間欄不動（先用 IncludeHandwritten 檢查一次，再按「標記為已核對」清掉）
+new UpdateCardScanRequest(2026, 10, null, [], IncludeHandwritten: true).ApplyTo(corrected);
+Check(corrected.ReviewFields.SequenceEqual(["layout", "year", "month", "name"]),
+    "Checking the handwritten switch flags the low-confidence handwritten fields");
+var confirmedBefore = corrected.Punches[1].AmIn;
+corrected.ReviewFields = [];
+Check(corrected.ReviewFields.Count == 0 && corrected.Punches[1].AmIn == confirmedBefore,
+    "Confirming clears the card flags without touching the punch times");
 
 var badTime = false;
 try
