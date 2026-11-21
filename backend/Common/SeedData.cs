@@ -21,7 +21,8 @@ public static class SeedData
         {
             ("Accounting", "支出分類", 0),
             ("AccountingDocumentType", "票據類型", 1),
-            ("AccountingSiteCategory", "地盤分類", 2)
+            ("AccountingSiteCategory", "地盤分類", 2),
+            ("AttendanceCard", "考勤卡圖片", 3)
         };
         var existingGroups = await db.SysDictGroups.ToListAsync();
         foreach (var (code, name, sort) in systemGroups)
@@ -64,6 +65,11 @@ public static class SeedData
         foreach (var (group, value, label) in accountingDicts)
             if (!existing.Any(dict => dict.GroupName == group && dict.Value == value))
                 db.SysDicts.Add(new SysDict { GroupName = group, Value = value, Label = label, Sort = Array.FindIndex(accountingDicts, item => item.Value == value), Enabled = true });
+        await db.SaveChangesAsync();
+
+        // 考勤卡原圖的文件類別：掃描上傳時用它登記到 storage_files，方便在文件模組回看
+        if (!await db.SysDicts.IgnoreQueryFilters().AnyAsync(dict => dict.GroupName == "AttendanceCard" && dict.Value == "card"))
+            db.SysDicts.Add(new SysDict { GroupName = "AttendanceCard", Value = "card", Label = "考勤卡", Sort = 0, Enabled = true });
         await db.SaveChangesAsync();
 
         if (await db.Users.AnyAsync())

@@ -92,7 +92,9 @@ builder.Services.Configure<OcrOptions>(options =>
     options.Endpoint = builder.Configuration["AZURE_DOC_ENDPOINT"] ?? "";
     options.Key = builder.Configuration["AZURE_DOC_KEY"] ?? "";
 });
+builder.Services.AddSingleton<DocumentIntelligenceClientProvider>();
 builder.Services.AddSingleton<IOcrService, AzureDocumentOcrService>();
+builder.Services.AddSingleton<IAttendanceCardOcrService, AzureAttendanceCardOcrService>();
 builder.Services.AddScoped<ReceiptRepository>();
 builder.Services.AddScoped<ReceiptService>();
 builder.Services.AddScoped<AccountingFileProtectionService>();
@@ -109,6 +111,7 @@ builder.Services.AddScoped<IAttendanceRepository, AttendanceRepository>();
 builder.Services.AddScoped<AttendanceServices>();
 builder.Services.AddScoped<IExternalAttendanceApi, ExternalAttendanceApi>();
 builder.Services.AddScoped<AttendanceTableService>();
+builder.Services.AddScoped<AttendanceCardService>();
 
 // Storage 模塊
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection("Storage"));

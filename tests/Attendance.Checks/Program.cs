@@ -1,0 +1,231 @@
+using System.ClientModel.Primitives;
+using System.Globalization;
+using Azure.AI.DocumentIntelligence;
+using MC.Erp.Common.Infrastructure.Ocr;
+using MC.Erp.Features.Attendance.Entities;
+using MC.Erp.Features.Attendance.Services;
+
+var checks = 0;
+void Check(bool condition, string message)
+{
+    if (!condition) throw new InvalidOperationException(message);
+    checks++;
+}
+
+AttendanceCard Parse(string json, double threshold = AzureDocumentOcrService.ConfidenceThreshold) =>
+    AttendanceCardParser.Parse(ModelReaderWriter.Read<AnalyzeResult>(BinaryData.FromString(json))
+        ?? throw new InvalidOperationException("Cannot read analyze result"), threshold);
+
+int At(string content, string text)
+{
+    var at = content.IndexOf(text, StringComparison.Ordinal);
+    return at >= 0 ? at : throw new InvalidOperationException($"{text} not found in fixture content");
+}
+
+// 用真實的 prebuilt-layout 回應形狀：格子只有 content / spans，置信度要從 words 的 span 對回來。
+// 所有 offset 都由 content 的實際位置算出，避免手算錯位。
+string Card(string content, (int Row, int Column, int Span, string Text)[] cells,
+    params (string Text, float Confidence)[] words)
+{
+    var wordJson = words.Select(word =>
+        $$"""{"content":"{{word.Text}}","span":{"offset":{{At(content, word.Text)}},"length":{{word.Text.Length}}},"confidence":{{word.Confidence.ToString(CultureInfo.InvariantCulture)}},"polygon":[0,0,1,0,1,1,0,1]}""");
+    var cellJson = cells.Select(cell =>
+        $$"""{"kind":"content","rowIndex":{{cell.Row}},"columnIndex":{{cell.Column}},"rowSpan":1,"columnSpan":{{cell.Span}},"content":"{{cell.Text}}","spans":[{"offset":{{At(content, cell.Text)}},"length":{{cell.Text.Length}}}],"boundingRegions":[]}""");
+    return $$"""
+{"apiVersion":"2024-11-30","modelId":"prebuilt-layout","stringIndexType":"utf16CodeUnit","content":"{{content}}",
+"pages":[{"pageNumber":1,"angle":0,"width":8.27,"height":11.69,"unit":"inch","words":[{{string.Join(",", wordJson)}}]}],
+"tables":[{"rowCount":{{cells.Max(cell => cell.Row) + 1}},"columnCount":{{cells.Max(cell => cell.Column + cell.Span)}},"cells":[{{string.Join(",", cellJson)}}]}]}
+""";
+}
+
+// 實測那張卡：表頭「日期」+ 紅字印刷時間（打卡鐘印的是「日號 + 時間」）＋頁腳干擾行
+var cardText = "考勤表 2026年10月份 姓名 朱駿豪 日期 上午 下午 加班 05 0509:07 0517:05 長 231 307";
+var full = Parse(Card(cardText,
+[
+    (0, 0, 1, "日期"), (0, 1, 1, "上午"), (0, 2, 1, "下午"), (0, 3, 1, "加班"),
+    (1, 0, 1, "05"), (1, 1, 1, "0509:07"), (1, 2, 1, "0517:05"),
+    (2, 0, 1, "長"), (2, 1, 1, "231"), (2, 2, 1, "307")
+],
+("0509:07", 0.95f), ("0517:05", 0.62f)));
+
+Check(full.Records.Count == 1, "Header and footer rows are not turned into days");
+Check(full.Records[0].Day == 5, "Day comes from the date column");
+Check(full.Records[0].AmIn.Value == "09:07", "Day prefix 0509:07 becomes 09:07");
+Check(full.Records[0].AmOut.Value == "17:05", "Second time column is the morning out");
+Check(full.Records[0].AmIn.Confidence == 0.95f, "Confidence comes from the words inside the cell");
+Check(full.Records[0].NeedsReview && full.Records[0].ReviewFields.SequenceEqual(["amOut"]),
+    "Low-confidence column is the only one flagged");
+Check(full.Records[0] is { PmIn.Value: null, PmOut.Value: null, OtIn.Value: null, OtOut.Value: null },
+    "Blank cells stay null instead of defaulting");
+Check(full.Year.Value == 2026 && full.Month.Value == 10, "Handwritten year and month are read from the text");
+Check(full.Name.Value == "朱駿豪", "Handwritten name is read after the 姓名 label");
+Check(full.ReviewFields.SequenceEqual(["year", "month", "name"]),
+    "Handwritten fields with no word confidence need review");
+Check(full.NeedsReview, "Low confidence anywhere marks the card as needing review");
+
+// 一個格子裡出現兩個時間，代表它橫跨上班 / 下班兩欄
+var merged = Parse(Card("日期 上午 下午 05 0509:07 0517:05",
+[
+    (0, 0, 1, "日期"), (0, 1, 1, "上午"), (0, 2, 1, "下午"),
+    (1, 0, 1, "05"), (1, 1, 2, "0509:07 0517:05")
+],
+("0509:07", 0.95f), ("0517:05", 0.94f)));
+Check(merged.Records[0] is { AmIn.Value: "09:07", AmOut.Value: "17:05" },
+    "Two times in one cell split into clock-in and clock-out");
+Check(merged.Records[0].NeedsReview == false, "Clear printed times need no review");
+
+// 1009:05 是「10 日 09:05」，不是 10 點
+var doubleDigitDay = Parse(Card("日期 上午 10 1009:05",
+[
+    (0, 0, 1, "日期"), (0, 1, 1, "上午"), (1, 0, 1, "10"), (1, 1, 1, "1009:05")
+], ("1009:05", 0.96f)));
+Check(doubleDigitDay.Records[0].Day == 10, "Two-digit day is not confused with the hour");
+Check(doubleDigitDay.Records[0].AmIn.Value == "09:05", "Two-digit day prefix is dropped from the time");
+
+// 小計欄有數字（或看起來像時間）都不算打卡
+var subtotal = Parse(Card("日期 上午 05 0509:07 2312:30",
+[
+    (0, 0, 1, "日期"), (0, 1, 1, "上午"),
+    (1, 0, 1, "05"), (1, 1, 1, "0509:07"), (1, 7, 1, "2312:30")
+], ("0509:07", 0.95f), ("2312:30", 0.95f)));
+Check(subtotal.Records[0] is { AmIn.Value: "09:07", OtOut.Value: null },
+    "Columns after the six time columns are ignored");
+
+// 休息日只有日號沒有時間，仍要保留一列，否則前端對不上日期
+var restDay = Parse(Card("日期 上午 下午 03",
+[
+    (0, 0, 1, "日期"), (0, 1, 1, "上午"), (0, 2, 1, "下午"), (1, 0, 1, "03")
+]));
+Check(restDay.Records.Count == 1 && restDay.Records[0].Day == 3, "A day with no punches is kept");
+Check(restDay.Records[0] is { AmIn.Value: null, OtOut.Value: null } && !restDay.Records[0].NeedsReview,
+    "An empty day is not flagged as low confidence");
+
+// 表頭漏檢時退回按閱讀順序填欄，並要求整張卡人工核對
+var noHeader = Parse(Card("上午 下午 0509:07 0517:05",
+[
+    (0, 0, 1, "上午"), (0, 1, 1, "下午"), (1, 0, 1, "0509:07"), (1, 1, 1, "0517:05")
+], ("0509:07", 0.95f), ("0517:05", 0.95f)));
+Check(noHeader.Records[0] is { Day: 5, AmIn.Value: "09:07", AmOut.Value: "17:05" },
+    "Without a date header the times are filled in reading order");
+Check(noHeader.ReviewFields.Contains("layout"), "A missing table header is flagged for review");
+
+// 沒有表格就不猜
+var noTable = false;
+try
+{
+    Parse("""
+    {"apiVersion":"2024-11-30","modelId":"prebuilt-layout","stringIndexType":"utf16CodeUnit","content":"","pages":[],"tables":[]}
+    """);
+}
+catch (InvalidOperationException) { noTable = true; }
+Check(noTable, "An image without a table is rejected instead of guessed");
+
+// 姓名在右邊的格子時用它自己的置信度
+var named = Parse(Card("姓名 朱駿豪 日期 05 0509:07",
+[
+    (0, 0, 1, "姓名"), (0, 1, 1, "朱駿豪"), (1, 0, 1, "日期"), (2, 0, 1, "05"), (2, 1, 1, "0509:07")
+], ("朱駿豪", 0.93f), ("0509:07", 0.95f)));
+Check(named.Name is { Value: "朱駿豪", Confidence: 0.93f }, "Name uses the confidence of its own cell");
+Check(!named.ReviewFields.Contains("name"), "A confident name is not flagged");
+
+// 印刷清晰的年月不需要複核
+var printedMonth = Parse(Card("2026年10月份 日期 05 0509:07",
+[
+    (0, 0, 1, "日期"), (1, 0, 1, "05"), (1, 1, 1, "0509:07")
+], ("2026", 0.95f), ("10", 0.95f), ("0509:07", 0.95f)));
+Check(printedMonth.Year is { Value: 2026, Confidence: 0.95f } && printedMonth.Month is { Value: 10, Confidence: 0.95f },
+    "Year and month carry their own confidence");
+Check(!printedMonth.ReviewFields.Contains("year") && !printedMonth.ReviewFields.Contains("month"),
+    "A confident year and month are not flagged");
+
+// 閾值可調
+var relaxed = Parse(Card(cardText,
+[
+    (0, 0, 1, "日期"), (0, 1, 1, "上午"), (0, 2, 1, "下午"), (0, 3, 1, "加班"),
+    (1, 0, 1, "05"), (1, 1, 1, "0509:07"), (1, 2, 1, "0517:05")
+],
+("0509:07", 0.95f), ("0517:05", 0.62f)), 0.5);
+Check(!relaxed.Records[0].NeedsReview, "Threshold is configurable per call");
+
+// 落庫再讀回來的形狀要和掃描結果一致
+var stored = AttendanceCardScanDto.From(new AttendanceCardScan
+{
+    Year = 2026,
+    YearConfidence = 0.9f,
+    Month = 10,
+    MonthConfidence = 0.55f,
+    Name = "朱駿豪",
+    NameConfidence = 0.31f,
+    ReviewFields = ["month", "name"],
+    Punches =
+    [
+        new AttendanceCardPunch
+        {
+            Day = 5, AmIn = new TimeOnly(9, 7), AmInConfidence = 0.95f,
+            AmOut = new TimeOnly(17, 5), AmOutConfidence = 0.62f
+        },
+        new AttendanceCardPunch { Day = 3 }
+    ]
+});
+Check(stored.Card is { Year.Value: 2026, Month.Value: 10 }, "Year and month survive the database round-trip");
+Check(stored.Card.Records.Select(row => row.Day).SequenceEqual([3, 5]), "Rows come back in day order");
+Check(stored.Card.Records[1] is { AmIn.Value: "09:07", AmOut.Value: "17:05" }, "Times are formatted back to HH:mm");
+Check(stored.Card.Records[1].ReviewFields.SequenceEqual(["amOut"]), "Row-level review flags are recomputed on read");
+Check(stored.Card.Records[0].NeedsReview == false, "An empty day stays clean after a round-trip");
+Check(stored.Card.NeedsReview, "The card still needs review after a round-trip");
+var summary = AttendanceCardScanSummaryDto.From(new AttendanceCardScan
+{
+    Year = 2026,
+    Month = 10,
+    ReviewFields = ["month"],
+    Punches = [new AttendanceCardPunch { Day = 5, OtIn = new TimeOnly(19, 0), OtInConfidence = 0.5f }]
+});
+Check(summary is { PunchCount: 1, NeedsReview: true }, "Summary counts rows and keeps low-confidence flags");
+Check(AttendanceCardScanSummaryDto.From(new AttendanceCardScan { Punches = [new AttendanceCardPunch { Day = 3 }] }).PunchCount == 0,
+    "A day with every time cleared is not counted as a punch day");
+
+// 人工修正：只覆寫改動的欄位，改過的記人工確認，沒改的保留原識別置信度
+var corrected = new AttendanceCardScan
+{
+    Year = 2026,
+    YearConfidence = 0.4f,
+    Month = 9,
+    MonthConfidence = 0.4f,
+    Name = "朱駿豪",
+    NameConfidence = 0.9f,
+    ReviewFields = ["layout", "year", "month"],
+    Punches = [new AttendanceCardPunch { Day = 5, AmIn = new TimeOnly(9, 7), AmInConfidence = 0.5f }]
+};
+new UpdateCardScanRequest(2026, 10, "朱駿豪",
+    [new UpdateCardPunch(5, "09:10", "17:05", null, null, null, null)]).ApplyTo(corrected);
+Check(corrected is { Month: 10, MonthConfidence: 1f }, "A corrected month is stored as manually confirmed");
+Check(corrected is { YearConfidence: 0.4f, NameConfidence: 0.9f }, "Untouched fields keep their OCR confidence");
+Check(corrected.ReviewFields.SequenceEqual(["layout", "year"]),
+    "Corrected fields drop out of review, layout stays because it cannot be recomputed");
+Check(corrected.Punches[0] is { AmInConfidence: 1f } && corrected.Punches[0].AmIn == new TimeOnly(9, 10),
+    "A corrected time is stored as manually confirmed");
+Check(corrected.Punches[0].AmOut == new TimeOnly(17, 5), "A new time fills the empty column of that day");
+
+// 清空時間、補一日、清空姓名
+new UpdateCardScanRequest(2026, 10, "",
+[
+    new UpdateCardPunch(5, "", null, null, null, null, null),
+    new UpdateCardPunch(6, "08:00", null, null, null, null, null)
+]).ApplyTo(corrected);
+Check(corrected.Punches[0] is { AmIn: null, AmInConfidence: null }, "An empty time clears the column and its confidence");
+Check(corrected.Punches[1] is { Day: 6 } && corrected.Punches[1].AmIn == new TimeOnly(8, 0),
+    "A day that was not on the scan can be added by hand");
+Check(corrected is { Name: null, NameConfidence: null }, "An empty name is cleared instead of stored as an empty string");
+Check(corrected.ReviewFields.SequenceEqual(["layout", "year", "name"]),
+    "A cleared field goes back to needing review");
+
+var badTime = false;
+try
+{
+    new UpdateCardScanRequest(2026, 10, null, [new UpdateCardPunch(5, "9.10", null, null, null, null, null)])
+        .ApplyTo(corrected);
+}
+catch (InvalidOperationException) { badTime = true; }
+Check(badTime, "A time that is not HH:mm is rejected instead of silently dropped");
+
+Console.WriteLine($"PASS: {checks} attendance checks (no Azure calls)");

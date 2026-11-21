@@ -2,15 +2,15 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using Azure;
 using Azure.AI.DocumentIntelligence;
-using Microsoft.Extensions.Options;
 
 namespace MC.Erp.Common.Infrastructure.Ocr;
 
 /// <summary>
 /// Azure Document Intelligence 包裝：收據 / 現沽單走 prebuilt-receipt，發票走 prebuilt-invoice。
 /// 只取票據表需要的欄位，並保留 Azure 回報的置信度；低於閾值的欄位標記為需人工複核。
+/// 客戶端與憑據由 <see cref="DocumentIntelligenceClientProvider"/> 共用，考勤卡識別用同一個 client。
 /// </summary>
-public sealed class AzureDocumentOcrService(IOptions<OcrOptions> options, IHttpContextAccessor context) : IOcrService
+public sealed class AzureDocumentOcrService(DocumentIntelligenceClientProvider provider) : IOcrService
 {
     /// <summary>
     /// 關鍵欄位低於此置信度即標記需人工複核。手寫金額、褶皺反光的照片尤其容易偏低，
@@ -18,36 +18,19 @@ public sealed class AzureDocumentOcrService(IOptions<OcrOptions> options, IHttpC
     /// </summary>
     public const double ConfidenceThreshold = 0.80;
 
-    private readonly OcrOptions settings = options.Value;
-    private readonly Lazy<DocumentIntelligenceClient> client = new(() =>
-    {
-        var clientOptions = new DocumentIntelligenceClientOptions { Retry = { MaxRetries = 2 } };
-        return new DocumentIntelligenceClient(new Uri(options.Value.Endpoint),
-            new AzureKeyCredential(options.Value.Key), clientOptions);
-    });
-
-    public bool IsConfigured => Uri.TryCreate(settings.Endpoint, UriKind.Absolute, out var endpoint)
-        && endpoint.Scheme == "https" && !string.IsNullOrWhiteSpace(settings.Key);
+    public bool IsConfigured => provider.IsConfigured;
 
     public async Task<OcrResult> RecognizeAsync(Stream content, string documentType)
     {
-        using var timeout = TimeoutSource();
+        using var timeout = provider.TimeoutSource();
         var bytes = await BinaryData.FromStreamAsync(content, timeout.Token);
         return await AnalyzeAsync(bytes, documentType, timeout.Token);
     }
 
     public async Task<OcrResult> RecognizeAsync(byte[] content, string documentType)
     {
-        using var timeout = TimeoutSource();
+        using var timeout = provider.TimeoutSource();
         return await AnalyzeAsync(BinaryData.FromBytes(content), documentType, timeout.Token);
-    }
-
-    /// <summary>CancellationToken 在基礎設施層處理：鏈接請求取消，再按超時兜底。</summary>
-    private CancellationTokenSource TimeoutSource()
-    {
-        var timeout = CancellationTokenSource.CreateLinkedTokenSource(context.HttpContext?.RequestAborted ?? default);
-        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(settings.TimeoutSeconds, 10, 120)));
-        return timeout;
     }
 
     private async Task<OcrResult> AnalyzeAsync(BinaryData bytes, string documentType, CancellationToken cancellationToken)
@@ -55,7 +38,7 @@ public sealed class AzureDocumentOcrService(IOptions<OcrOptions> options, IHttpC
         if (!IsConfigured) throw new InvalidOperationException("Azure 識別服務尚未配置，請手動填寫或配置後重試");
         // 一次只分析一張單據，避免多頁 / 多圖時把第一張的欄位當成全部
         var request = new AnalyzeDocumentOptions(ModelFor(documentType), bytes);
-        var operation = await client.Value.AnalyzeDocumentAsync(WaitUntil.Completed, request, cancellationToken);
+        var operation = await provider.Client.AnalyzeDocumentAsync(WaitUntil.Completed, request, cancellationToken);
         return ParseResult(operation.Value, documentType);
     }
 

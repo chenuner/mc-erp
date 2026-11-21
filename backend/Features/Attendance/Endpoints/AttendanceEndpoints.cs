@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using MC.Erp.Common;
 using MC.Erp.Common.Errors;
 using MC.Erp.Common.Security;
 using MC.Erp.Features.Attendance.Entities;
@@ -25,6 +26,14 @@ public static class AttendanceEndpoints
 
         // 打卡記錄
         group.MapGet("/records/{workerId:guid}", GetRecordsAsync).RequireAuthorization();
+
+        // 考勤卡掃描：掃描即落庫，可再查詢、人工修正及刪除
+        group.MapPost("/scan", ScanCardAsync).RequireAuthorization("admin").DisableAntiforgery();
+        group.MapPost("/scan/url", ScanCardUrlAsync).RequireAuthorization("admin");
+        group.MapGet("/scans", ListCardScansAsync).RequireAuthorization();
+        group.MapGet("/scans/{id:guid}", GetCardScanAsync).RequireAuthorization();
+        group.MapPut("/scans/{id:guid}", UpdateCardScanAsync).RequireAuthorization("admin");
+        group.MapDelete("/scans/{id:guid}", DeleteCardScanAsync).RequireAuthorization("admin");
 
         // 月結工數表
         group.MapGet("/summaries", GetSummariesAsync).RequireAuthorization();
@@ -81,6 +90,48 @@ public static class AttendanceEndpoints
         return TypedResults.Ok(records.Select(RecordDto.From).ToList());
     }
 
+    // --- 考勤卡掃描 ---
+    private static async Task<Ok<AttendanceCardScanDto>> ScanCardAsync(
+        IFormFile file, AttendanceCardService svc, CancellationToken ct)
+        => TypedResults.Ok(await svc.ScanAsync(file, ct));
+
+    private static async Task<Ok<AttendanceCardScanDto>> ScanCardUrlAsync(
+        ScanUrlRequest request, AttendanceCardService svc, CancellationToken ct)
+        => TypedResults.Ok(await svc.ScanAsync(request.Url, ct));
+
+    private static bool ValidScanQuery(int? year, int? month, int page, int pageSize)
+        => (year is null or >= 2000 and <= 2099) && (month is null or >= 1 and <= 12)
+        && page is >= 1 and <= 100000 && pageSize is >= 1 and <= 100;
+
+    private static ValidationProblem InvalidScanQuery() => TypedResults.ValidationProblem(new Dictionary<string, string[]>
+    {
+        ["query"] = ["年份須為 2000 至 2099、月份須為 1 至 12（兩者可不填），頁碼須為 1 至 100000，每頁須為 1 至 100。"]
+    });
+
+    private static async Task<Results<Ok<PagedResult<AttendanceCardScanSummaryDto>>, ValidationProblem>> ListCardScansAsync(
+        int? year, int? month, AttendanceCardService svc, CancellationToken ct, int page = 1, int pageSize = 20)
+    {
+        if (!ValidScanQuery(year, month, page, pageSize)) return InvalidScanQuery();
+        var result = await svc.ListAsync(year, month, page, pageSize, ct);
+        return TypedResults.Ok(new PagedResult<AttendanceCardScanSummaryDto>(result.Items, result.Total, page, pageSize));
+    }
+
+    private static async Task<Ok<AttendanceCardScanDto>> GetCardScanAsync(
+        Guid id, AttendanceCardService svc, CancellationToken ct)
+        => TypedResults.Ok(await svc.FindAsync(id, ct));
+
+    /// <summary>人工修正識別結果（年月、姓名、每日時間）；只寫回真正改動的欄位。</summary>
+    private static async Task<Ok<AttendanceCardScanDto>> UpdateCardScanAsync(
+        Guid id, UpdateCardScanRequest request, AttendanceCardService svc, CancellationToken ct)
+        => TypedResults.Ok(await svc.UpdateAsync(id, request, ct));
+
+    private static async Task<NoContent> DeleteCardScanAsync(
+        Guid id, AttendanceCardService svc, CancellationToken ct)
+    {
+        await svc.DeleteAsync(id, ct);
+        return TypedResults.NoContent();
+    }
+
     // --- 月結 ---
     private static async Task<Ok<List<SummaryDto>>> GetSummariesAsync(
         int year, int month, AttendanceServices svc, CancellationToken ct)
@@ -119,3 +170,5 @@ public sealed record SummaryDto(Guid Id, Guid WorkerId, int Year, int Month, dec
 public sealed record CreateWorkerRequest([Required] string Name, string? EmployeeId, decimal DailyWage);
 public sealed record UpdateWorkerRequest(decimal? DailyWage, bool? IsActive);
 public sealed record CreateSiteRequest([Required] string Name, string? Address);
+/// <summary>考勤卡圖片連結；必須是 https，由 Azure 直接拉取。</summary>
+public sealed record ScanUrlRequest([Required] string Url);

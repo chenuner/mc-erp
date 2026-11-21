@@ -77,7 +77,7 @@ backend/
 ├── appsettings.json            # 配置
 ├── Common/                     # 公共基礎設施
 │   ├── Domain/                 # 基類：Entity / AuditableEntity
-│   ├── Infrastructure/Ocr/     # IOcrService / Azure 實現
+│   ├── Infrastructure/Ocr/     # IOcrService / 共用 Document Intelligence client / 考勤卡解析
 │   ├── Security/               # JWT / 密碼哈希 / 當前用戶上下文
 │   └── SeedData.cs             # 啟動時遷移 + 初始管理員
 ├── Features/                   # 業務模組
@@ -87,9 +87,9 @@ backend/
 │   │   ├── Entities/           # User / Role / Permission / UserRole / RolePermission
 │   │   └── Repositories/       # IUserRepository / IRoleRepository + 實現
 │   ├── Attendance/
-│   │   ├── Endpoints/          # 工數查詢 / 月結報表 / 打卡表 / mock
-│   │   ├── Services/           # AttendanceServices / AttendanceTableService / 外部 API
-│   │   ├── Entities/           # AttendanceRecord / MonthlyWorkSummary / Worker / Site
+│   │   ├── Endpoints/          # 工數查詢 / 月結報表 / 打卡表 / 考勤卡掃描 / mock
+│   │   ├── Services/           # AttendanceServices / AttendanceTableService / AttendanceCardService / 外部 API
+│   │   ├── Entities/           # AttendanceRecord / MonthlyWorkSummary / Worker / Site / AttendanceCardScan / AttendanceCardPunch
 │   │   └── Repositories/       # IAttendanceRepository + 實現
 │   ├── Accounting/
 │   │   ├── Endpoints/          # 收據上傳 / 識別 / 保存 / 匯出
@@ -183,10 +183,24 @@ User ─┬─ UserRole ── Role ── RolePermission ── Permission
 - CancellationToken 在 Infrastructure 層統一處理
 - 拉取後存入 `attendance_records` 表，按月匯總計算薪酬
 
+### 考勤卡掃描（Attendance）
+
+- 輸入是「微電腦打卡鐘」月卡照片，版式固定：日期 | 上午上班 / 下班 | 下午上班 / 下班 | 加班上班 / 下班 | 小計。掃描結果即時落庫（`attendance_card_scans` + `attendance_card_punches`）供前端核對；不改寫既有打卡明細，導入是後續步驟。
+- 入庫欄位與識別結果一一對應：年月姓名各帶置信度，明細每欄存 `time` 及各自的置信度。**不存工時、加班時數或合計**——計薪規則未確認，那些一律在查詢時按明細計算。
+- 卡片層級的複核標記（year / month / name / layout）原樣存 `text[]`；明細行的複核標記按當前閾值即時算，因為它完全可由置信度推回，而 `layout`（表頭漏檢）推不回來，所以必須存。
+- 掃描結果可人工修正（`PUT /api/attendance/scans/{id}`，僅 Admin，前端雙擊年月、姓名或時間即可改）：只覆寫真正改動的欄位，改過的欄位置信度記 1（人工確認），沒改的保留原本識別置信度；卡級複核標記隨即重算，`layout` 除外（只能靠重新掃描解決）。時間須為 HH:mm，留空即清除該欄；卡上漏讀的日子可補。前端識別後與保存修正後都把月份篩選移到識別到的年月，避免新記錄因篩選不符而看不到。
+- 原圖存 `storage_files`，文件類別用啟動時 SeedData 建立的 `AttendanceCard` / `card` 字典；一筆掃描對應一張原圖。URL 掃描由 Azure 拉圖，本服務不下載、不存原圖。掃描失敗不寫任何資料，也不留孤兒原圖。
+- 與票據識別共用同一個 `DocumentIntelligenceClient`（`DocumentIntelligenceClientProvider`）及同一份 `AZURE_DOC_ENDPOINT` / `AZURE_DOC_KEY`，模型改用 `prebuilt-layout`，不新增環境變量。單圖上限 4 MB，只收 JPEG / PNG（看檔頭不看副檔名），一次只認一張卡。
+- `prebuilt-layout` 只回表格格子，格子本身沒有置信度，所以按 `RowIndex` / `ColumnIndex` 還原行列，再用格子的 `Spans` 對回逐字置信度並取最低值。
+- 打卡鐘印的是「日號 + 時間」（`0509:07` = 05 日 09:07），時間一律正規化為 HH:mm；同一格出現兩個時間（`09:07 17:05`）代表它橫跨上班 / 下班兩欄，按順序拆開；小計欄及之後的欄位忽略。
+- 只有 1–31 的日號才算日期，表頭、標題、頁腳合計（231 / 307）不會被當成日期；表頭「日期」漏檢時退回按閱讀順序填欄，並把整張卡標記為 `layout` 需複核。休息日（只有日號、沒有時間）保留空列，方便前端對齊日期。
+- 置信度閾值 0.80：印刷紅字時間逐欄標記；手寫的年份、月份、姓名沒有逐字置信度時一律要求人工補。手寫數字不得當作已核對。
+- `prebuilt-layout` 對紅色印刷的打卡時間較穩（等寬、印刷體）；對手寫（月份、底部合計）識別率低，不能保證準確。若手寫長期不準，可評估改用 GPT-4o 視覺模型直出 JSON 作備選方案，但須先更新 `specs/tech-stack.md` 並確認費用，不得擅自引入。
+
 ### OCR 識別（會計收據）
 
 - 票據可直接手動錄入（不必先有原圖），原圖可稍後補上或更換。前端只有一個「保存」動作，保存後即完成，沒有草稿狀態；必填為票據類型、支出分類（不能是 pending）及地盤分類，日期、金額、幣種可留空。OCR 只在使用者按「OCR 識別」時執行，回傳建議欄位，由使用者決定是否填入（只填空白欄位），不直接改寫票據資料。
-- `IOcrService` 位於 Common/Infrastructure/Ocr，使用官方 C# SDK `Azure.AI.DocumentIntelligence`；憑據只從環境變量 `AZURE_DOC_ENDPOINT` / `AZURE_DOC_KEY` 讀取，代碼和 appsettings 不出現密鑰；收據中文識別須實測，不能保證準確率。
+- `IOcrService` 位於 Common/Infrastructure/Ocr，使用官方 C# SDK `Azure.AI.DocumentIntelligence`；客戶端由 `DocumentIntelligenceClientProvider` 共用（考勤卡掃描用同一個 client）；憑據只從環境變量 `AZURE_DOC_ENDPOINT` / `AZURE_DOC_KEY` 讀取，代碼和 appsettings 不出現密鑰；收據中文識別須實測，不能保證準確率。
 - `Receipt.SiteCategoryDictId` 引用 `AccountingSiteCategory` 字典，是票據唯一的地盤歸屬，同時決定導出 ZIP 的頂層目錄；不引用考勤 `Site`，會計與考勤的地盤各自獨立（考勤地盤只用於考勤模組）。
 - `DocumentTypeDictId` 引用 `AccountingDocumentType`（receipt / invoice）。支出分類由 `Receipt.Type` 持有（`Accounting` 字典），沒有原圖也可保存；有原圖時同步寫入 `FileItem.Type`，供文件模組按分類展示。
 - 金額 decimal(18,2)，票據日期 DateOnly；發票金額取 InvoiceTotal，不取可能含歷史欠款的 AmountDue，也不自動視為已付款。

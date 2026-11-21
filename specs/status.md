@@ -17,6 +17,7 @@
 | Attendance | 自動計薪、MPF、OT 計算 | ❌ 未實現；原 `PayrollService` 未註冊已移除（算法見 git 歷史） | — |
 | Attendance | 外部打卡 API 同步 | ❌ 未實現；`ExternalAttendanceApi` 只提供模擬資料 | — |
 | Attendance | 模擬資料初始化 | ✅ 所有環境可用（管理員）；刻意不關閉 | `POST /api/attendance/mock` |
+| Attendance | 考勤卡照片掃描（prebuilt-layout → 逐行打卡並落庫，每欄帶置信度，低置信度提示複核，可雙擊人工修正） | ✅ 可用（與票據共用 Azure 憑據，需配置才啟用）；掃描結果待人工核對後才由後續步驟導入打卡明細 | `POST /api/attendance/scan`、`GET /api/attendance/scans`、`PUT /api/attendance/scans/{id}` |
 | Accounting | 手動新增票據、上傳/補上原圖、OCR 建議（每欄帶置信度，低於閾值提示人工複核）、刪除票據、ZIP 匯出 | ✅ 可用（OCR 需配置才啟用） | `ReceiptService` |
 | Storage | 本地文件上傳 / 下載 / 刪除、MD5 | ✅ 可用 | `FileService` |
 | Storage | 按地盤 / 帳戶的檔案權限（FilePermission） | ❌ 未實現，目前只有 Admin / 非 Admin 粗粒度 | — |

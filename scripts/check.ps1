@@ -1,5 +1,5 @@
 #Requires -Version 7
-# 本地一鍵驗證；CI 只做建置打包，不跑檢查。兩個 Checks 共用 backend 的 Release 輸出，必須順序執行。
+# 本地一鍵驗證；CI 只做建置打包，不跑檢查。三個 Checks 共用 backend 的 Release 輸出，必須順序執行。
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
@@ -15,6 +15,10 @@ try {
     Write-Host '==> Accounting checks' -ForegroundColor Cyan
     dotnet run --project tests/Accounting.Checks/Accounting.Checks.csproj -c Release
     if ($LASTEXITCODE -ne 0) { throw 'Accounting checks 失敗' }
+
+    Write-Host '==> Attendance checks' -ForegroundColor Cyan
+    dotnet run --project tests/Attendance.Checks/Attendance.Checks.csproj -c Release
+    if ($LASTEXITCODE -ne 0) { throw 'Attendance checks 失敗' }
 
     Write-Host '==> Frontend typecheck + build' -ForegroundColor Cyan
     pnpm -C frontend run build
