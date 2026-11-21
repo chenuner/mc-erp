@@ -44,6 +44,8 @@ const cameraInput = ref<HTMLInputElement>()
 const imageUrl = ref('')
 const imageLoading = ref(false)
 const ocrPanel = ref<string[]>([])
+/** 本次識別中置信度偏低、需要人工複核的欄位名。 */
+const ocrReview = ref<string[]>([])
 const formRef = ref<FormInstance>()
 const form = reactive<UpdateReceipt>({ version: '', documentTypeDictId: '', type: '', siteCategoryDictId: null,
   receiptDate: null, amount: null, currencyCode: null, merchantName: null, invoiceNumber: null, remark: null })
@@ -81,9 +83,6 @@ const rules: FormRules = {
       }, trigger: 'change' }],
 }
 const statusNames: Record<string, string> = { NotStarted: '未識別', Processing: '識別中', Succeeded: '已識別', Failed: '識別失敗' }
-const confidenceFields = computed(() => Object.entries(selected.value?.ocrResult?.documents?.[0]?.fields ?? {})
-  .filter(([, field]) => field.confidence != null)
-  .map(([name, field]) => ({ name, text: field.content, confidence: Math.round((field.confidence ?? 0) * 100) })))
 const pendingTypeSelected = computed(() => types.value.find(dict => dict.id === form.type)?.value === 'pending')
 
 function query(): ReceiptQuery {
@@ -128,6 +127,7 @@ function openCreate() {
   selected.value = null
   resetForm()
   ocrPanel.value = []
+  ocrReview.value = []
   revokeImage()
   imageLoading.value = false
   detailVisible.value = true
@@ -140,6 +140,7 @@ async function openDetail(receipt: ReceiptDto) {
     const detail = await getReceipt(receipt.id)
     fill(detail)
     ocrPanel.value = []
+    ocrReview.value = detail.ocrResult?.reviewFields ?? []
     detailVisible.value = true
     revokeImage()
     imageLoading.value = true
@@ -194,9 +195,14 @@ async function recognize() {
     ocrPanel.value = ['ocr']
     if (receipt.ocrStatus === 'Succeeded') {
       const filled = fillFromOcr(fields)
-      if (filled.length) ElMessage.success(`已識別並填入：${filled.join('、')}`)
-      else ElMessage.info('識別完成，欄位已有資料未覆蓋；可從「原始識別結果」複製')
+      ocrReview.value = fields.reviewFields
+      if (ocrReview.value.length) {
+        const suffix = filled.length ? `（已填入：${filled.join('、')}）` : ''
+        ElMessage.warning(`已識別，但${reviewText(ocrReview.value)}置信度偏低，請人工核對${suffix}`)
+      } else if (filled.length) ElMessage.success(`已識別並填入：${filled.join('、')}`)
+      else ElMessage.info('識別完成，欄位已有資料未覆蓋；可從「識別結果」查看')
     } else {
+      ocrReview.value = []
       ElMessage.warning(receipt.ocrError ?? '未能識別，請手動填寫')
     }
     await load()
@@ -210,16 +216,39 @@ const currencyOptions = computed(() => {
   const current = form.currencyCode?.trim().toUpperCase()
   return current && !defaults.includes(current) ? [...defaults, current] : defaults
 })
-const ocrLabels = { merchantName: '商戶', receiptDate: '票據日期', amount: '金額', currencyCode: '幣種', invoiceNumber: '票據號碼' } as const
+const ocrLabels: Record<string, string> = { merchantName: '商戶', receiptDate: '票據日期', amount: '金額', currencyCode: '幣種', invoiceNumber: '票據號碼' }
+const ocrFieldKeys = ['merchantName', 'receiptDate', 'amount', 'currencyCode', 'invoiceNumber'] as const
+
+/** 已保存的識別結果，按票據欄位順序展示；只有票據表關心的欄位，不含 Azure 的內部欄位名。 */
+const ocrSummary = computed(() => {
+  const fields = selected.value?.ocrResult
+  if (!fields) return []
+  const review = new Set(fields.reviewFields ?? [])
+  return ocrFieldKeys.map(key => {
+    const field = fields[key]
+    return {
+      key,
+      label: ocrLabels[key],
+      text: field?.value == null || field.value === '' ? '未識別' : String(field.value),
+      confidence: field?.confidence == null ? null : Math.round(field.confidence * 100),
+      review: review.has(key),
+    }
+  })
+})
+
+/** 把低置信度欄位名轉成中文，供提示文案使用。 */
+function reviewText(names: string[]) {
+  return names.map(name => ocrLabels[name] ?? name).join('、')
+}
 
 /** 只填空白欄位；回傳實際填入的中文欄名。 */
 function fillFromOcr(fields: OcrSuggestion) {
   const filled: string[] = []
-  if (fields.merchantName && !form.merchantName) { form.merchantName = fields.merchantName; filled.push(ocrLabels.merchantName) }
-  if (fields.receiptDate && !form.receiptDate) { form.receiptDate = fields.receiptDate; filled.push(ocrLabels.receiptDate) }
-  if (fields.amount != null && form.amount == null) { form.amount = fields.amount; filled.push(ocrLabels.amount) }
-  if (fields.currencyCode && !form.currencyCode) { form.currencyCode = fields.currencyCode; filled.push(ocrLabels.currencyCode) }
-  if (fields.invoiceNumber && !form.invoiceNumber) { form.invoiceNumber = fields.invoiceNumber; filled.push(ocrLabels.invoiceNumber) }
+  if (fields.merchantName.value && !form.merchantName) { form.merchantName = fields.merchantName.value; filled.push(ocrLabels.merchantName) }
+  if (fields.receiptDate.value && !form.receiptDate) { form.receiptDate = fields.receiptDate.value; filled.push(ocrLabels.receiptDate) }
+  if (fields.amount.value != null && form.amount == null) { form.amount = fields.amount.value; filled.push(ocrLabels.amount) }
+  if (fields.currencyCode.value && !form.currencyCode) { form.currencyCode = fields.currencyCode.value; filled.push(ocrLabels.currencyCode) }
+  if (fields.invoiceNumber.value && !form.invoiceNumber) { form.invoiceNumber = fields.invoiceNumber.value; filled.push(ocrLabels.invoiceNumber) }
   if (fields.categoryValue && (!form.type || form.type === pendingTypeId.value)) {
     const dict = types.value.find(item => item.enabled && item.value === fields.categoryValue)
     if (dict) { form.type = dict.id; filled.push('支出分類') }
@@ -378,6 +407,7 @@ onBeforeUnmount(revokeImage)
     <el-dialog v-model="detailVisible" :title="selected ? '票據資料' : '新增票據'" width="min(1000px, calc(100vw - 32px))" :close-on-click-modal="!busy" :show-close="!busy" :close-on-press-escape="!busy" @closed="revokeImage">
       <div v-if="selected" class="detail-status"><span>{{ selected.fileItemId ? statusNames[selected.ocrStatus] : '未上傳原圖' }}</span><el-button :disabled="busy || !configured || !selected.fileItemId" :loading="busy" @click="recognize">OCR 識別</el-button></div>
       <el-alert v-if="selected?.ocrError" :title="selected.ocrError" type="warning" :closable="false" show-icon />
+      <el-alert v-if="ocrReview.length" :title="`需人工複核：${reviewText(ocrReview)}（識別置信度偏低或未讀到值，請對照原圖核對）`" type="warning" :closable="false" show-icon />
       <div class="detail-grid">
         <div class="detail-left">
           <div v-loading="imageLoading" class="image-panel">
@@ -402,13 +432,19 @@ onBeforeUnmount(revokeImage)
           <el-collapse v-if="selected" v-model="ocrPanel" class="ocr-panel">
             <el-collapse-item name="ocr">
               <template #title>
-                <span class="ocr-panel-title">原始識別結果</span>
+                <span class="ocr-panel-title">識別結果</span>
                 <el-tag v-if="selected.ocrStatus === 'Succeeded'" size="small" type="success" effect="plain">已識別</el-tag>
                 <el-tag v-else-if="selected.ocrStatus === 'Failed'" size="small" type="danger" effect="plain">識別失敗</el-tag>
               </template>
               <div v-if="selected.ocrResult || selected.ocrText" class="ocr-body">
-                <div class="confidence-list"><div v-for="field in confidenceFields" :key="field.name" class="confidence-field"><el-tag :type="field.confidence < 80 ? 'warning' : 'info'">{{ field.name }}: {{ field.confidence }}%</el-tag><span>{{ field.text }}</span></div></div>
-                <pre class="ocr-text">{{ selected.ocrText || '尚無識別文字' }}</pre>
+                <div v-if="selected.ocrResult" class="confidence-list">
+                  <div v-for="field in ocrSummary" :key="field.key" class="confidence-field">
+                    <el-tag :type="field.review ? 'warning' : 'info'">{{ field.label }}</el-tag>
+                    <span>{{ field.text }}</span>
+                    <span v-if="field.confidence != null" class="confidence-value" :class="{ low: field.review }">{{ field.confidence }}%</span>
+                  </div>
+                </div>
+                <pre v-if="selected.ocrText" class="ocr-text">{{ selected.ocrText }}</pre>
               </div>
               <p v-else class="ocr-empty">尚未識別。有原圖後按上方「OCR 識別」，原文會顯示在這裡，方便複製填寫。</p>
             </el-collapse-item>
@@ -485,6 +521,8 @@ onBeforeUnmount(revokeImage)
 .form-hint { font-size: 12px; line-height: 1.5; color: var(--el-color-warning); }
 .confidence-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .confidence-field { display: flex; gap: 8px; flex-wrap: wrap; overflow-wrap: anywhere; max-width: 100%; }
+.confidence-value { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--el-text-color-secondary); }
+.confidence-value.low { color: var(--el-color-warning); }
 .ocr-text { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 12px; background: var(--el-fill-color-lighter); padding: 8px; border-radius: var(--el-border-radius-base); }
 @media (max-width: 700px) {
   .filters { grid-template-columns: minmax(0, 1fr); }

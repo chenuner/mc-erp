@@ -30,6 +30,7 @@ public sealed class Receipt : AuditableEntity
     public string? Remark { get; set; }
     public string OcrStatus { get; set; } = "NotStarted";
     public string? OcrError { get; set; }
+    /// <summary>識別建議（票據欄位 + 置信度 + 待複核欄位）；不保存 Azure 原始結果，避免存 pages / words 等無用資料。</summary>
     public string? OcrResultJson { get; set; }
     public string? OcrText { get; set; }
     public DateTime? OcrStartedAt { get; set; }

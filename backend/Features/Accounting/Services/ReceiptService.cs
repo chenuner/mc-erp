@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using MC.Erp.Common.Infrastructure.Ocr;
 using MC.Erp.Features.Accounting.Entities;
@@ -13,9 +14,14 @@ public sealed record UpdateReceiptRequest(Guid Version, Guid DocumentTypeDictId,
     Guid Type, Guid? SiteCategoryDictId, DateOnly? ReceiptDate, decimal? Amount,
     string? CurrencyCode, string? MerchantName, string? InvoiceNumber, string? Remark);
 
-/// <summary>OCR 建議值；只供前端參考填入，不會直接改寫票據資料。</summary>
-public sealed record OcrSuggestion(string? MerchantName, DateOnly? ReceiptDate, decimal? Amount,
-    string? CurrencyCode, string? InvoiceNumber, string? CategoryValue);
+/// <summary>OCR 建議值；只供前端參考填入，不會直接改寫票據資料。每個欄位帶 Azure 回報的置信度。</summary>
+public sealed record OcrSuggestion(OcrField<string?> MerchantName, OcrField<DateOnly?> ReceiptDate,
+    OcrField<decimal?> Amount, OcrField<string?> CurrencyCode, OcrField<string?> InvoiceNumber,
+    string? CategoryValue, IReadOnlyList<string> ReviewFields)
+{
+    /// <summary>有欄位低於置信度閾值，前端須提示人工複核。</summary>
+    public bool NeedsReview => ReviewFields.Count > 0;
+}
 
 public sealed class ReceiptService(ReceiptRepository repo, FileService files, SysDictService dicts,
     IOcrService ocr, ILogger<ReceiptService> logger)
@@ -167,11 +173,13 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
             var download = await files.下载Async(receipt.FileItemId.Value) ?? throw new InvalidOperationException("原圖不存在");
             await using var content = download.Content;
             var result = await ocr.RecognizeAsync(content, documentType.Value);
-            receipt.OcrResultJson = result.Json;
+            var suggestion = Suggest(result);
+            // 只存票據表需要的欄位；Azure 原始結果（pages / words / polygon）不入庫、不回前端
+            receipt.OcrResultJson = JsonSerializer.Serialize(suggestion);
             receipt.OcrText = result.Text;
             receipt.OcrStatus = "Succeeded";
             await repo.SaveRecognitionAsync(receipt);
-            return (receipt, Suggest(result));
+            return (receipt, suggestion);
         }
         catch (DbUpdateConcurrencyException) { throw; }
         catch (Exception exception) when (exception is Azure.RequestFailedException or OperationCanceledException or IOException or InvalidOperationException)
@@ -181,23 +189,34 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
             receipt.OcrError = exception is OperationCanceledException ? "識別超時或請求已取消，原圖保留，請重試"
                 : exception is InvalidOperationException ? exception.Message : "識別服務失敗，原圖保留，請重試或手動填寫";
             await repo.SaveRecognitionAsync(receipt);
-            return (receipt, new OcrSuggestion(null, null, null, null, null, null));
+            return (receipt, EmptySuggestion());
         }
     }
 
+    private static OcrSuggestion EmptySuggestion() => new(
+        new OcrField<string?>(null, null), new OcrField<DateOnly?>(null, null),
+        new OcrField<decimal?>(null, null), new OcrField<string?>(null, null),
+        new OcrField<string?>(null, null), null, []);
+
     private static OcrSuggestion Suggest(OcrResult result) => new(
-        result.MerchantName is { } merchant ? merchant[..Math.Min(merchant.Length, 255)] : null,
-        result.Date,
-        result.Amount,
-        result.CurrencyCode is { Length: 3 } ? result.CurrencyCode.ToUpperInvariant() : null,
-        result.InvoiceNumber is { } number ? number[..Math.Min(number.Length, 100)] : null,
-        SuggestCategory(result));
+        Truncate(result.MerchantName, 255),
+        result.TransactionDate,
+        result.Total,
+        result.CurrencyCode,
+        Truncate(result.InvoiceNumber, 100),
+        SuggestCategory(result),
+        result.ReviewFields);
+
+    /// <summary>按票據表欄位長度截斷；置信度一併保留。</summary>
+    private static OcrField<string?> Truncate(OcrField<string?> field, int maxLength) =>
+        field.Value is { } value ? field with { Value = value[..Math.Min(value.Length, maxLength)] } : field;
 
     public static string? SuggestCategory(OcrResult result)
     {
-        if (result.ReceiptType == "Meal") return "meals";
-        if (result.ReceiptType?.StartsWith("Fuel&Energy", StringComparison.OrdinalIgnoreCase) == true) return "fuel";
-        if (result.ReceiptType?.StartsWith("Transportation", StringComparison.OrdinalIgnoreCase) == true) return "transport";
+        var receiptType = result.ReceiptType.Value;
+        if (receiptType == "Meal") return "meals";
+        if (receiptType?.StartsWith("Fuel&Energy", StringComparison.OrdinalIgnoreCase) == true) return "fuel";
+        if (receiptType?.StartsWith("Transportation", StringComparison.OrdinalIgnoreCase) == true) return "transport";
         var matches = new List<string>();
         var text = result.Text;
         foreach (var (category, keywords) in new (string, string[])[]

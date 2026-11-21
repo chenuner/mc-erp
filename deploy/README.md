@@ -100,7 +100,7 @@ printf '%s ' '你的服务器公网IP'; sudo cut -d ' ' -f 1,2 /etc/ssh/ssh_host
 | `DEPLOY_USER` | `deploy`，不填时也默认使用此值 |
 | `DEPLOY_PORT` | `22`，非标准 SSH 端口按实际填写 |
 
-数据库密码、JWT 密钥和首次管理员密码已在服务器随机生成，不需要添加到 GitHub。可选 OCR 配置在服务器 `/opt/mc-erp/.env` 中添加 `OCR_ENDPOINT`、`OCR_KEY` 后重新部署；不配置时可以手动录入票据。
+数据库密码、JWT 密钥和首次管理员密码已在服务器随机生成，不需要添加到 GitHub。可选 OCR 配置在服务器 `/opt/mc-erp/.env` 中添加 `AZURE_DOC_ENDPOINT`、`AZURE_DOC_KEY` 后重新部署；不配置时可以手动录入票据。
 
 ## 4. 部署和登录
 

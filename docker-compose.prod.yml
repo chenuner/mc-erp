@@ -38,8 +38,8 @@ services:
       Jwt__SecretKey: ${JWT_SECRET:?Set JWT_SECRET}
       Bootstrap__AdminPassword: ${INITIAL_ADMIN_PASSWORD:?Set INITIAL_ADMIN_PASSWORD}
       Storage__RootPath: /app/storage-files
-      Ocr__Endpoint: ${OCR_ENDPOINT:-}
-      Ocr__Key: ${OCR_KEY:-}
+      AZURE_DOC_ENDPOINT: ${AZURE_DOC_ENDPOINT:-}
+      AZURE_DOC_KEY: ${AZURE_DOC_KEY:-}
     volumes:
       - storage:/app/storage-files
       - logs:/app/logs

@@ -85,7 +85,13 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<IPasswordHasher, PasswordHasher>();
 builder.Services.AddSingleton<IJwtTokenGenerator, JwtTokenGenerator>();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
-builder.Services.Configure<OcrOptions>(builder.Configuration.GetSection("Ocr"));
+// 識別憑據只從環境變數讀（生產 / CI 注入），本機用 dotnet user-secrets 存同名鍵，
+// 代碼和 appsettings 都不出現真實密鑰。
+builder.Services.Configure<OcrOptions>(options =>
+{
+    options.Endpoint = builder.Configuration["AZURE_DOC_ENDPOINT"] ?? "";
+    options.Key = builder.Configuration["AZURE_DOC_KEY"] ?? "";
+});
 builder.Services.AddSingleton<IOcrService, AzureDocumentOcrService>();
 builder.Services.AddScoped<ReceiptRepository>();
 builder.Services.AddScoped<ReceiptService>();

@@ -1,8 +1,11 @@
-using System.Text.Json;
 using System.ClientModel.Primitives;
+using System.Text.Json;
 using Azure.AI.DocumentIntelligence;
 using MC.Erp.Common.Infrastructure.Ocr;
+using MC.Erp.Features.Accounting.Endpoints;
+using MC.Erp.Features.Accounting.Entities;
 using MC.Erp.Features.Accounting.Services;
+using MC.Erp.Features.System.Entities;
 
 var checks = 0;
 void Check(bool condition, string message)
@@ -11,41 +14,130 @@ void Check(bool condition, string message)
     checks++;
 }
 
-OcrResult Parse(string json, string type)
+OcrResult Parse(string json, string type, double threshold = AzureDocumentOcrService.ConfidenceThreshold)
 {
-    var sdkResult = ModelReaderWriter.Read<AnalyzeResult>(BinaryData.FromString(json))!;
-    using var result = JsonDocument.Parse(ModelReaderWriter.Write(sdkResult).ToString());
-    return AzureDocumentOcrService.ParseResult(result.RootElement, type);
+    var sdkResult = ModelReaderWriter.Read<AnalyzeResult>(BinaryData.FromString(json))
+        ?? throw new InvalidOperationException("Cannot read analyze result");
+    return AzureDocumentOcrService.ParseResult(sdkResult, type, threshold);
 }
 
 var receipt = Parse("""
 {"apiVersion":"2024-11-30","modelId":"prebuilt-receipt","stringIndexType":"utf16CodeUnit","pages":[],"content":"cement","documents":[{"docType":"receipt","confidence":0.99,"spans":[],"boundingRegions":[],"fields":{
-"MerchantName":{"type":"string","valueString":"Builder"},
-"TransactionDate":{"type":"date","valueDate":"2026-12-31"},
-"Total":{"type":"currency","valueCurrency":{"amount":123.45,"currencyCode":"HKD"}},
-"ReceiptType":{"type":"string","valueString":"Supplies"}}}]}
+"MerchantName":{"type":"string","valueString":"Builder","confidence":0.97},
+"TransactionDate":{"type":"date","valueDate":"2026-12-31","confidence":0.95},
+"Total":{"type":"currency","valueCurrency":{"amount":123.45,"currencyCode":"HKD"},"confidence":0.72},
+"ReceiptType":{"type":"string","valueString":"Supplies","confidence":0.9}}}]}
 """, "receipt");
-Check(receipt.Amount == 123.45m && receipt.CurrencyCode == "HKD", "Receipt currency mapping");
-Check(receipt.Date == new DateOnly(2026, 12, 31), "Receipt date mapping");
-Check(receipt.MerchantName == "Builder", "Merchant mapping");
+Check(receipt.Total.Value == 123.45m && receipt.CurrencyCode.Value == "HKD", "Receipt currency mapping");
+Check(receipt.TransactionDate.Value == new DateOnly(2026, 12, 31), "Receipt date mapping");
+Check(receipt.MerchantName.Value == "Builder", "Merchant mapping");
+Check(receipt.MerchantName.Confidence == 0.97f, "Merchant confidence carried through");
+Check(receipt.ReviewFields.SequenceEqual(new[] { "amount" }), "Low-confidence amount flagged for review");
+Check(receipt.NeedsReview, "Low confidence marks the result as needing review");
+Check(receipt.ReviewFields.Contains("merchantName") == false, "High-confidence merchant not flagged");
+Check(Parse("""
+{"apiVersion":"2024-11-30","modelId":"prebuilt-receipt","stringIndexType":"utf16CodeUnit","pages":[],"content":"","documents":[{"docType":"receipt","confidence":0.99,"spans":[],"boundingRegions":[],"fields":{
+"Total":{"type":"currency","valueCurrency":{"amount":123.45,"currencyCode":"HKD"},"confidence":0.72}}}]}
+""", "receipt", 0.5).NeedsReview == false, "Threshold is configurable per call");
 Check(ReceiptService.SuggestCategory(receipt) == "materials", "Materials suggestion");
 var invoice = Parse("""
 {"apiVersion":"2024-11-30","modelId":"prebuilt-invoice","stringIndexType":"utf16CodeUnit","pages":[],"content":"","documents":[{"docType":"invoice","confidence":0.99,"spans":[],"boundingRegions":[],"fields":{
-"VendorName":{"type":"string","valueString":"Supplier"},
-"InvoiceDate":{"type":"date","valueDate":"2026-01-01"},
-"InvoiceId":{"type":"string","valueString":"INV-1"},
-"InvoiceTotal":{"type":"currency","valueCurrency":{"amount":110}},
-"AmountDue":{"type":"currency","valueCurrency":{"amount":610}}}}]}
+"VendorName":{"type":"string","valueString":"Supplier","confidence":0.95},
+"InvoiceDate":{"type":"date","valueDate":"2026-01-01","confidence":0.95},
+"InvoiceId":{"type":"string","valueString":"INV-1","confidence":0.95},
+"InvoiceTotal":{"type":"currency","valueCurrency":{"amount":110},"confidence":0.95},
+"AmountDue":{"type":"currency","valueCurrency":{"amount":610},"confidence":0.95}}}]}
 """, "invoice");
-Check(invoice.Amount == 110m, "AmountDue must not replace InvoiceTotal");
-Check(invoice.CurrencyCode == null, "Ambiguous currency stays null");
-Check(invoice.InvoiceNumber == "INV-1" && invoice.MerchantName == "Supplier", "Invoice fields mapping");
+Check(invoice.Total.Value == 110m, "AmountDue must not replace InvoiceTotal");
+Check(invoice.CurrencyCode.Value == null, "Ambiguous currency stays null");
+Check(invoice.InvoiceNumber.Value == "INV-1" && invoice.MerchantName.Value == "Supplier", "Invoice fields mapping");
+Check(invoice.NeedsReview == false, "High-confidence invoice needs no review");
 var missing = Parse("""
 {"apiVersion":"2024-11-30","modelId":"prebuilt-receipt","stringIndexType":"utf16CodeUnit","pages":[],"content":"","documents":[{"docType":"receipt","confidence":0.99,"spans":[],"boundingRegions":[],"fields":{}}]}
 """, "receipt");
-Check(missing.Amount == null && missing.Date == null, "Missing fields must not default to zero/today");
-Check(ReceiptService.SuggestCategory(receipt with { Text = "cement rental", ReceiptType = null }) == null, "Conflicting categories stay pending");
-Check(ReceiptService.SuggestCategory(receipt with { ReceiptType = "Transportation.Parking" }) == "transport", "Azure receipt type mapping");
+Check(missing.Total.Value == null && missing.TransactionDate.Value == null, "Missing fields must not default to zero/today");
+Check(missing.NeedsReview == false, "Missing fields are not low-confidence fields");
+// 實測案例：收據「合 計 / 879」很清楚，Azure 的 Total 只回 content="$"、confidence 0.659，沒有 valueCurrency
+OcrResult WithTotalField(string content) => Parse("""
+{"apiVersion":"2024-11-30","modelId":"prebuilt-receipt","stringIndexType":"utf16CodeUnit","pages":[],"content":"__CONTENT__","documents":[{"docType":"receipt","confidence":0.97,"spans":[],"boundingRegions":[],"fields":{
+"Total":{"type":"currency","content":"$","confidence":0.659},
+"TransactionDate":{"type":"date","valueDate":"2020-11-01","confidence":0.979}}}]}
+""".Replace("__CONTENT__", content), "receipt");
+
+var recovered = WithTotalField(@"合 計\n879");
+Check(recovered.Total.Value == 879m, "Total recovered from 合計 line");
+Check(recovered.Total.Confidence == AzureDocumentOcrService.TextFallbackConfidence, "Text fallback keeps low confidence");
+Check(recovered.ReviewFields.SequenceEqual(new[] { "amount" }), "Text fallback still needs review");
+var symbolOnly = WithTotalField("TOTAL $");
+Check(symbolOnly.Total.Value == null, "Symbol-only total stays empty");
+Check(symbolOnly.Total.Confidence == 0.659f, "Field confidence kept when value is missing");
+Check(symbolOnly.NeedsReview, "Unreadable amount needs review");
+Check(WithTotalField("TOTAL $ 1,234.50").Total.Value == 1234.50m, "Inline total with thousands separator");
+Check(WithTotalField(@"TOTAL\n2026.11.21 23:56").Total.Value == null, "Dates are not taken as totals");
+// 實測樣本（現沽單照片）的完整識別文字：金額要落在 879，不能抓到底下的相機水印
+var realText = """
+M.
+現 沽 單
+1
+CASH MEMO
+A
+2020年11月1日
+貨號
+NO.
+貨
+DESCRIPTION
+名
+數量
+單價
+折扣
+金 額
+QUANTITY
+UNIT PRICE
+DISCOUNT
+AMOUNT
+古费
+E FOOD IS GOOD
+合 計
+879
+經手人
+TOTAL $
+SIGNATURE
+xiaomi 17 Pro Max
+Leica
+23mm f/1.67 1/60s ISO160
+2026.11.21 23:56
+22°31'6"N 114°4'8"E
+""";
+Check(AzureDocumentOcrService.TotalFromText(realText).Value == 879m, "Real receipt text resolves the total");
+var multiDocumentRejected = false;
+try
+{
+    Parse("""
+{"apiVersion":"2024-11-30","modelId":"prebuilt-receipt","stringIndexType":"utf16CodeUnit","pages":[],"content":"","documents":[
+{"docType":"receipt","confidence":0.99,"spans":[],"boundingRegions":[],"fields":{}},
+{"docType":"receipt","confidence":0.99,"spans":[],"boundingRegions":[],"fields":{}}]}
+""", "receipt");
+}
+catch (InvalidOperationException) { multiDocumentRejected = true; }
+Check(multiDocumentRejected, "Multiple documents rejected");
+Check(ReceiptService.SuggestCategory(receipt with { Text = "cement rental", ReceiptType = new OcrField<string?>(null, null) }) == null, "Conflicting categories stay pending");
+Check(ReceiptService.SuggestCategory(receipt with { ReceiptType = new OcrField<string?>("Transportation.Parking", null) }) == "transport", "Azure receipt type mapping");
+// 回應只帶票據欄位：新資料存識別建議、可原樣回傳；舊的 Azure 原始 JSON 不回前端
+Receipt StoredReceipt(string json) => new()
+{
+    DocumentTypeDict = new SysDict { Label = "收據" },
+    TypeDict = new SysDict { Label = "材料" },
+    OcrResultJson = json
+};
+var storedResponse = ReceiptResponse.From(StoredReceipt(JsonSerializer.Serialize(new OcrSuggestion(
+    new OcrField<string?>("陳記", 0.93f), new OcrField<DateOnly?>(new DateOnly(2026, 11, 18), 0.91f),
+    new OcrField<decimal?>(1234.50m, 0.62f), new OcrField<string?>("HKD", 0.62f),
+    new OcrField<string?>(null, null), null, new[] { "amount" }))));
+Check(storedResponse.OcrResult?.Amount.Value == 1234.50m, "Stored suggestion round-trips");
+Check(storedResponse.OcrResult?.ReviewFields.Contains("amount") == true, "Stored review fields survive");
+Check(ReceiptResponse.From(StoredReceipt("""
+{"apiVersion":"2024-11-30","modelId":"prebuilt-receipt","documents":[]}
+""")).OcrResult == null, "Legacy Azure payload is not returned to the client");
 var unsafeName = ReceiptService.SafeName("../../bad\\image:*.png");
 Check(!unsafeName.Contains("..") && !unsafeName.Contains('/') && !unsafeName.Contains('\\'), "ZIP path sanitization");
 Console.WriteLine($"PASS: {checks} accounting checks (no Azure calls)");

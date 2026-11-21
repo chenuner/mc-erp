@@ -23,16 +23,26 @@ export interface ReceiptDto {
   ocrStatus: string
   ocrError: string | null
   ocrText: string | null
-  ocrResult: { documents?: { fields?: Record<string, { confidence?: number; content?: string }> }[] } | null
+  /** 已保存的識別建議；舊資料沒有欄位結構時為 null。 */
+  ocrResult: OcrSuggestion | null
+}
+
+/** 單一識別欄位：值 + Azure 回報的置信度（0–1）；未識別到時兩者皆為 null。 */
+export interface OcrField<T> {
+  value: T | null
+  confidence: number | null
 }
 
 export interface OcrSuggestion {
-  merchantName: string | null
-  receiptDate: string | null
-  amount: number | null
-  currencyCode: string | null
-  invoiceNumber: string | null
+  merchantName: OcrField<string>
+  receiptDate: OcrField<string>
+  amount: OcrField<number>
+  currencyCode: OcrField<string>
+  invoiceNumber: OcrField<string>
   categoryValue: string | null
+  /** 置信度低於閾值的欄位名，例如 ['amount']。 */
+  reviewFields: string[]
+  needsReview: boolean
 }
 
 export interface RecognizeResult {
