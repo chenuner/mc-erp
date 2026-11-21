@@ -13,11 +13,12 @@
 | 模組 | 功能 | 狀態 | 入口 |
 |------|------|------|------|
 | Identity | 登入、用戶/角色管理、JWT | ✅ 可用 | `Features/Identity` |
-| Attendance | 薪酬表 / 打卡表查詢、人工維護 | ✅ 可用 | `AttendanceTableService` |
-| Attendance | 自動計薪、MPF、OT 計算 | ❌ 未實現；原 `PayrollService` 未註冊已移除（算法見 git 歷史） | — |
+| Attendance | 薪酬表 / 打卡表查詢、人工維護、按考勤卡重算薪酬 | ✅ 可用 | `AttendanceTableService` / `AttendanceRules` |
+| Attendance | 員工（工人）管理：新增、編輯（姓名／工號／日薪／在職）、停用、刪除（軟刪除）；薪酬表與打卡明細的姓名篩選是員工下拉 | ✅ 可用（僅 Admin，入口在考勤薪酬頁） | `AttendanceServices` / `DELETE /api/attendance/workers/{id}` |
+| Attendance | 計薪（工數、MPF、OT、實付人工） | ✅ 由考勤卡同步時按 `AttendanceRules` 重算「一個員工一個月」；未做全月一鍵重算、沒有定時任務 | `AttendanceCardService.SyncAsync` |
 | Attendance | 外部打卡 API 同步 | ❌ 未實現；`ExternalAttendanceApi` 只提供模擬資料 | — |
 | Attendance | 模擬資料初始化 | ✅ 所有環境可用（管理員）；刻意不關閉 | `POST /api/attendance/mock` |
-| Attendance | 考勤卡照片掃描（prebuilt-layout → 逐行打卡並落庫，每欄帶置信度，低置信度提示複核，可雙擊人工修正） | ✅ 可用（與票據共用 Azure 憑據，需配置才啟用）；掃描結果待人工核對後才由後續步驟導入打卡明細 | `POST /api/attendance/scan`、`GET /api/attendance/scans`、`PUT /api/attendance/scans/{id}` |
+| Attendance | 考勤卡照片掃描（prebuilt-layout → 逐行打卡並落庫，每欄帶置信度；手寫年月姓名不計入複核，可雙擊人工修正，可按「標記為已核對」放行；按「同步」導入打卡明細並重算該員工該月薪酬） | ✅ 可用（與票據共用 Azure 憑據，需配置才啟用） | `POST /api/attendance/scan`、`GET /api/attendance/scans`、`PUT /api/attendance/scans/{id}`、`POST /api/attendance/scans/{id}/confirm`、`POST /api/attendance/scans/{id}/sync` |
 | Accounting | 手動新增票據、上傳/補上原圖、OCR 建議（每欄帶置信度，低於閾值提示人工複核）、刪除票據、ZIP 匯出 | ✅ 可用（OCR 需配置才啟用） | `ReceiptService` |
 | Storage | 本地文件上傳 / 下載 / 刪除、MD5 | ✅ 可用 | `FileService` |
 | Storage | 按地盤 / 帳戶的檔案權限（FilePermission） | ❌ 未實現，目前只有 Admin / 非 Admin 粗粒度 | — |

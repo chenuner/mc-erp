@@ -59,9 +59,9 @@ Check(full.Records[0] is { PmIn.Value: null, PmOut.Value: null, OtIn.Value: null
     "Blank cells stay null instead of defaulting");
 Check(full.Year.Value == 2026 && full.Month.Value == 10, "Handwritten year and month are read from the text");
 Check(full.Name.Value == "朱駿豪", "Handwritten name is read after the 姓名 label");
-Check(full.ReviewFields.SequenceEqual(["year", "month", "name"]),
-    "Handwritten fields with no word confidence need review");
-Check(full.NeedsReview, "Low confidence anywhere marks the card as needing review");
+Check(full.ReviewFields.Count == 0,
+    "Handwritten fields no longer hold the card in review (confidence still reported per field)");
+Check(full.NeedsReview, "A low-confidence printed time still flags the card, and its row");
 
 // 一個格子裡出現兩個時間，代表它橫跨上班 / 下班兩欄
 var merged = Parse(Card("日期 上午 下午 05 0509:07 0517:05",
@@ -200,8 +200,8 @@ new UpdateCardScanRequest(2026, 10, "朱駿豪",
     [new UpdateCardPunch(5, "09:10", "17:05", null, null, null, null)]).ApplyTo(corrected);
 Check(corrected is { Month: 10, MonthConfidence: 1f }, "A corrected month is stored as manually confirmed");
 Check(corrected is { YearConfidence: 0.4f, NameConfidence: 0.9f }, "Untouched fields keep their OCR confidence");
-Check(corrected.ReviewFields.SequenceEqual(["layout", "year"]),
-    "Corrected fields drop out of review, layout stays because it cannot be recomputed");
+Check(corrected.ReviewFields.SequenceEqual(["layout"]),
+    "Handwritten year/month/name never hold the card in review; layout stays because it cannot be recomputed");
 Check(corrected.Punches[0] is { AmInConfidence: 1f } && corrected.Punches[0].AmIn == new TimeOnly(9, 10),
     "A corrected time is stored as manually confirmed");
 Check(corrected.Punches[0].AmOut == new TimeOnly(17, 5), "A new time fills the empty column of that day");
@@ -216,8 +216,28 @@ Check(corrected.Punches[0] is { AmIn: null, AmInConfidence: null }, "An empty ti
 Check(corrected.Punches[1] is { Day: 6 } && corrected.Punches[1].AmIn == new TimeOnly(8, 0),
     "A day that was not on the scan can be added by hand");
 Check(corrected is { Name: null, NameConfidence: null }, "An empty name is cleared instead of stored as an empty string");
-Check(corrected.ReviewFields.SequenceEqual(["layout", "year", "name"]),
-    "A cleared field goes back to needing review");
+Check(corrected.ReviewFields.SequenceEqual(["layout"]),
+    "A cleared handwritten field is not treated as needing review either");
+
+// 勾了「一併檢查手寫欄位」才把低置信度、漏讀的手寫欄拉回複核
+var strict = new AttendanceCardScan
+{
+    Year = 2026, YearConfidence = 0.4f, Month = 10, MonthConfidence = 1f,
+    Name = "朱駿豪", NameConfidence = 0.7f, ReviewFields = ["layout"]
+};
+Check(UpdateCardScanRequest.ReviewFieldsOf(strict, includeHandwritten: true).SequenceEqual(["layout", "year", "name"]),
+    "Asking to include handwritten fields puts the low-confidence ones back in review");
+Check(UpdateCardScanRequest.ReviewFieldsOf(strict, includeHandwritten: false).SequenceEqual(["layout"]),
+    "By default handwritten fields stay out of review");
+
+// 人工標記為已核對：卡片層標記清空，時間欄不動（先用 IncludeHandwritten 檢查一次，再按「標記為已核對」清掉）
+new UpdateCardScanRequest(2026, 10, null, [], IncludeHandwritten: true).ApplyTo(corrected);
+Check(corrected.ReviewFields.SequenceEqual(["layout", "year", "month", "name"]),
+    "Checking the handwritten switch flags the low-confidence handwritten fields");
+var confirmedBefore = corrected.Punches[1].AmIn;
+corrected.ReviewFields = [];
+Check(corrected.ReviewFields.Count == 0 && corrected.Punches[1].AmIn == confirmedBefore,
+    "Confirming clears the card flags without touching the punch times");
 
 var badTime = false;
 try
@@ -227,5 +247,61 @@ try
 }
 catch (InvalidOperationException) { badTime = true; }
 Check(badTime, "A time that is not HH:mm is rejected instead of silently dropped");
+
+// --- 考勤卡 → 打卡明細 ---
+var workerId = Guid.NewGuid();
+var siteId = Guid.NewGuid();
+var worked = new AttendanceCardPunch
+{
+    Day = 5, AmIn = new TimeOnly(9, 7), AmOut = new TimeOnly(12, 0),
+    PmIn = new TimeOnly(13, 0), PmOut = new TimeOnly(17, 5),
+    OtIn = new TimeOnly(18, 0), OtOut = new TimeOnly(20, 30)
+};
+Check(AttendanceRules.HasTime(worked), "A day with any punched time counts as worked");
+Check(!AttendanceRules.HasTime(new AttendanceCardPunch { Day = 5 }), "A rest day with no time at all is not a work day");
+
+var cardRecord = AttendanceRules.ToRecord(2026, 10, worked, workerId, siteId);
+Check(cardRecord.ClockInTime == new DateTime(2026, 10, 5, 1, 7, 0, DateTimeKind.Utc),
+    "09:07 on the card (Hong Kong) is stored as 01:07 UTC");
+Check(cardRecord.ClockOutTime == new DateTime(2026, 10, 5, 9, 5, 0, DateTimeKind.Utc),
+    "17:05 on the card (Hong Kong) is stored as 09:05 UTC");
+Check(cardRecord.OvertimeHours == 2.5m, "Overtime is the gap between the overtime punches");
+Check(cardRecord is { IsLaborLeave: false, Remark: AttendanceRules.ImportedRemark },
+    "Imported rows are marked as card imports and are never labour leave");
+Check(cardRecord.WorkerId == workerId && cardRecord.SiteId == siteId, "Imported rows are linked to the chosen worker and site");
+
+var midnightRecord = AttendanceRules.ToRecord(2026, 10,
+    new AttendanceCardPunch { Day = 31, AmIn = new TimeOnly(22, 0), AmOut = new TimeOnly(1, 30) }, workerId, siteId);
+Check(midnightRecord.ClockOutTime == midnightRecord.ClockInTime.AddHours(3).AddMinutes(30),
+    "An out time earlier than the in time is treated as after midnight");
+Check(AttendanceRules.OvertimeHoursOf(new AttendanceCardPunch { OtIn = new TimeOnly(22, 0), OtOut = new TimeOnly(1, 0) }) == 3m,
+    "Overtime that runs past midnight is counted forward");
+Check(AttendanceRules.OvertimeHoursOf(new AttendanceCardPunch { OtIn = new TimeOnly(18, 0) }) == 0m,
+    "A half-entered overtime pair is not counted");
+
+// --- 打卡明細 → 薪酬表 ---
+Check(AttendanceRules.OvertimeRateOf(900m) == 168.75m, "Overtime rate is daily wage / 8 * 1.5");
+var payroll = new MonthlyWorkSummary { Year = 2026, Month = 10, LaborLeaveDays = 1m, Remark = "人工備註" };
+AttendanceRules.ApplyPayroll(payroll, 900m, 22, 6.5m);
+Check(payroll is { WorkDays: 22m, TotalWorkDays: 23m, OvertimeHours: 6.5m, DailyWage: 900m },
+    "Work days, total work days (with labour leave kept), overtime hours and daily wage are filled in");
+Check(payroll.OvertimeAmount == 1096.88m, "Overtime amount is hours * rate, rounded to 2 decimals");
+Check(payroll is { MpfEmployer: 1150m, MpfEmployee: 1150m }, "MPF is 50 per total work day on both sides");
+Check(payroll.ActualPay == 20646.88m, "Actual pay is daily wage * total work days - employee MPF + overtime");
+Check(payroll.TotalAmount == 22946.88m, "Total is employer MPF + employee MPF + actual pay");
+Check(payroll.Remark == "人工備註", "Recomputing keeps the manual remark");
+
+var counted = new List<AttendanceRecord>
+{
+    new() { ClockInTime = DateTime.UtcNow },
+    new() { ClockInTime = DateTime.UtcNow },
+    new() { ClockInTime = DateTime.UtcNow, IsLaborLeave = true }
+};
+Check(AttendanceRules.WorkDaysOf(counted) == 2, "Work days count every punch row that is not labour leave");
+
+var (monthStart, monthEnd) = AttendanceRules.MonthRange(2026, 10);
+Check(monthStart == new DateTime(2026, 9, 30, 16, 0, 0, DateTimeKind.Utc)
+    && monthEnd == new DateTime(2026, 10, 31, 16, 0, 0, DateTimeKind.Utc),
+    "A Hong Kong month maps to the UTC range shared with the attendance tables");
 
 Console.WriteLine($"PASS: {checks} attendance checks (no Azure calls)");

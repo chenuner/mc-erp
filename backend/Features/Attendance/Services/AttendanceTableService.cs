@@ -6,25 +6,27 @@ namespace MC.Erp.Features.Attendance.Services;
 
 public sealed class AttendanceTableService(ErpDbContext db, IExternalAttendanceApi externalApi)
 {
+    /// <summary>薪酬表查詢；workerId 有值就只看該員工（姓名下拉選的是 id，重名也不會混在一起）。</summary>
     public async Task<(List<MonthlyWorkSummary> Items, int Total)> GetPayrollAsync(
-        int year, int month, string? name, int page, int pageSize, CancellationToken ct)
+        int year, int month, Guid? workerId, int page, int pageSize, CancellationToken ct)
     {
         var query = db.MonthlyWorkSummaries.AsNoTracking().Include(s => s.Worker)
             .Where(s => s.Year == year && s.Month == month && !s.Worker.IsDeleted);
-        if (!string.IsNullOrWhiteSpace(name)) query = query.Where(s => s.Worker.Name.Contains(name.Trim()));
+        if (workerId is { } selected && selected != Guid.Empty) query = query.Where(s => s.WorkerId == selected);
         var total = await query.CountAsync(ct);
         var items = await query.OrderBy(s => s.Worker.Name).ThenBy(s => s.Id)
             .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
         return (items, total);
     }
 
+    /// <summary>打卡明細查詢；workerId 有值就只看該員工。</summary>
     public async Task<(List<AttendanceRecord> Items, int Total)> GetPunchesAsync(
-        int year, int month, string? name, int page, int pageSize, CancellationToken ct)
+        int year, int month, Guid? workerId, int page, int pageSize, CancellationToken ct)
     {
-        var (start, end) = MonthRange(year, month);
+        var (start, end) = AttendanceRules.MonthRange(year, month);
         var query = db.AttendanceRecords.AsNoTracking().Include(r => r.Worker).Include(r => r.Site)
             .Where(r => r.ClockInTime >= start && r.ClockInTime < end && !r.Worker.IsDeleted && !r.Site.IsDeleted);
-        if (!string.IsNullOrWhiteSpace(name)) query = query.Where(r => r.Worker.Name.Contains(name.Trim()));
+        if (workerId is { } selected && selected != Guid.Empty) query = query.Where(r => r.WorkerId == selected);
         var total = await query.CountAsync(ct);
         var items = await query.OrderByDescending(r => r.ClockInTime).ThenBy(r => r.Worker.Name).ThenBy(r => r.Id)
             .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
@@ -41,7 +43,7 @@ public sealed class AttendanceTableService(ErpDbContext db, IExternalAttendanceA
 
     public async Task<int> InitializeMockAsync(int year, int month, CancellationToken ct)
     {
-        var (start, end) = MonthRange(year, month);
+        var (start, end) = AttendanceRules.MonthRange(year, month);
         var source = await externalApi.FetchRecordsAsync(start, end, ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var added = 0;
@@ -88,9 +90,4 @@ public sealed class AttendanceTableService(ErpDbContext db, IExternalAttendanceA
         return added;
     }
 
-    private static (DateTime Start, DateTime End) MonthRange(int year, int month)
-    {
-        var start = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Utc).AddHours(-8);
-        return (start, new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(1).AddHours(-8));
-    }
 }

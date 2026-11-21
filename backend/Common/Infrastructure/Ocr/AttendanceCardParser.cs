@@ -63,9 +63,9 @@ public static class AttendanceCardParser
         var review = new List<string>();
         // 表頭被切歪或漏檢：退化為按閱讀順序填欄，整張卡都要人工核對
         if (headerRow < 0) review.Add("layout");
-        Flag(review, "year", year, threshold);
-        Flag(review, "month", month, threshold);
-        Flag(review, "name", name, threshold);
+        // 手寫的年月姓名不列入卡片層複核：它們的置信度普遍在 0.6–0.75，用印刷體的 0.80 去卡，
+        // 每張卡都會一直掛「需覆核」。置信度照樣回報給前端提示，需要嚴格把關時可勾「一併檢查手寫欄位」。
+        // 時間欄（印刷紅字）仍然逐欄判定，見 BuildRow。
 
         var records = new List<AttendanceRow>();
         for (var index = headerRow + 1; index < rows.Count; index++)
@@ -223,10 +223,5 @@ public static class AttendanceCardParser
             if (lowest is null || confidence < lowest) lowest = confidence;
         }
         return lowest;
-    }
-
-    private static void Flag<T>(List<string> review, string field, OcrField<T> value, double threshold)
-    {
-        if (value.Value is null || value.Confidence is not { } confidence || confidence < threshold) review.Add(field);
     }
 }

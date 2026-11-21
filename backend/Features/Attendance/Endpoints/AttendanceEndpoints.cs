@@ -19,6 +19,7 @@ public static class AttendanceEndpoints
         group.MapGet("/workers", ListWorkersAsync).RequireAuthorization();
         group.MapPost("/workers", CreateWorkerAsync).RequireAuthorization("admin");
         group.MapPut("/workers/{id:guid}", UpdateWorkerAsync).RequireAuthorization("admin");
+        group.MapDelete("/workers/{id:guid}", DeleteWorkerAsync).RequireAuthorization("admin");
 
         // 地盤
         group.MapGet("/sites", ListSitesAsync).RequireAuthorization();
@@ -33,15 +34,17 @@ public static class AttendanceEndpoints
         group.MapGet("/scans", ListCardScansAsync).RequireAuthorization();
         group.MapGet("/scans/{id:guid}", GetCardScanAsync).RequireAuthorization();
         group.MapPut("/scans/{id:guid}", UpdateCardScanAsync).RequireAuthorization("admin");
+        // 人工對照原卡核對完：清掉卡片層複核標記
+        group.MapPost("/scans/{id:guid}/confirm", ConfirmCardScanAsync).RequireAuthorization("admin");
         group.MapDelete("/scans/{id:guid}", DeleteCardScanAsync).RequireAuthorization("admin");
+        // 同步：把識別結果導入打卡明細，並重算該員工該月的薪酬表
+        group.MapPost("/scans/{id:guid}/sync", SyncCardAsync).RequireAuthorization("admin");
 
         // 月結工數表
         group.MapGet("/summaries", GetSummariesAsync).RequireAuthorization();
         group.MapGet("/summaries/{workerId:guid}", GetWorkerSummaryAsync).RequireAuthorization();
 
-        // 操作
-        group.MapPost("/calculate", () => TypedResults.Problem(
-            "計薪規則尚未確認，暫不開放自動計算。", statusCode: StatusCodes.Status409Conflict)).RequireAuthorization("admin");
+        // 薪酬表（含人工迴寫）與模擬數據
         group.MapAttendanceTableEndpoints();
     }
 
@@ -62,8 +65,15 @@ public static class AttendanceEndpoints
     private static async Task<Results<Ok<WorkerDto>, NotFound>> UpdateWorkerAsync(
         Guid id, UpdateWorkerRequest req, AttendanceServices svc, CancellationToken ct)
     {
-        var worker = await svc.UpdateWorkerAsync(id, req.DailyWage, req.IsActive, ct);
+        var worker = await svc.UpdateWorkerAsync(id, req.Name, req.EmployeeId, req.DailyWage, req.IsActive, ct);
         return worker is null ? TypedResults.NotFound() : TypedResults.Ok(WorkerDto.From(worker));
+    }
+
+    /// <summary>刪除員工：軟刪除，已入庫的打卡明細和薪酬保留但不顯示；要暫時隱藏請用停用（isActive=false）。</summary>
+    private static async Task<NoContent> DeleteWorkerAsync(Guid id, AttendanceServices svc, CancellationToken ct)
+    {
+        await svc.DeleteWorkerAsync(id, ct);
+        return TypedResults.NoContent();
     }
 
     // --- 地盤 ---
@@ -125,12 +135,22 @@ public static class AttendanceEndpoints
         Guid id, UpdateCardScanRequest request, AttendanceCardService svc, CancellationToken ct)
         => TypedResults.Ok(await svc.UpdateAsync(id, request, ct));
 
+    /// <summary>人工核對完成：清掉卡片層的複核標記（時間欄不改），狀態由「需覆核」變「已識別」。</summary>
+    private static async Task<Ok<AttendanceCardScanDto>> ConfirmCardScanAsync(
+        Guid id, ConfirmCardScanRequest request, AttendanceCardService svc, CancellationToken ct)
+        => TypedResults.Ok(await svc.ConfirmAsync(id, request, ct));
+
     private static async Task<NoContent> DeleteCardScanAsync(
         Guid id, AttendanceCardService svc, CancellationToken ct)
     {
         await svc.DeleteAsync(id, ct);
         return TypedResults.NoContent();
     }
+
+    /// <summary>把識別結果導入打卡明細（員工、地盤由使用者指定），並重算該員工該月的薪酬表。</summary>
+    private static async Task<Ok<CardSyncResultDto>> SyncCardAsync(
+        Guid id, SyncCardRequest request, AttendanceCardService svc, CancellationToken ct)
+        => TypedResults.Ok(await svc.SyncAsync(id, request, ct));
 
     // --- 月結 ---
     private static async Task<Ok<List<SummaryDto>>> GetSummariesAsync(
@@ -167,8 +187,11 @@ public sealed record SummaryDto(Guid Id, Guid WorkerId, int Year, int Month, dec
     public static SummaryDto From(MonthlyWorkSummary s) => new(s.Id, s.WorkerId, s.Year, s.Month, s.WorkDays, s.LaborLeaveDays, s.TotalWorkDays, s.OvertimeHours, s.DailyWage, s.OvertimeAmount, s.MpfEmployer, s.MpfEmployee, s.ActualPay, s.TotalAmount, s.Remark);
 }
 
-public sealed record CreateWorkerRequest([Required] string Name, string? EmployeeId, decimal DailyWage);
-public sealed record UpdateWorkerRequest(decimal? DailyWage, bool? IsActive);
+public sealed record CreateWorkerRequest([Required, MaxLength(50)] string Name, [MaxLength(50)] string? EmployeeId,
+    [Range(typeof(decimal), "0", "999999.99")] decimal DailyWage);
+/// <summary>員工管理：只改有給的欄位（姓名、工號、日薪、在職）。</summary>
+public sealed record UpdateWorkerRequest([MaxLength(50)] string? Name, [MaxLength(50)] string? EmployeeId,
+    [Range(typeof(decimal), "0", "999999.99")] decimal? DailyWage, bool? IsActive);
 public sealed record CreateSiteRequest([Required] string Name, string? Address);
 /// <summary>考勤卡圖片連結；必須是 https，由 Azure 直接拉取。</summary>
 public sealed record ScanUrlRequest([Required] string Url);

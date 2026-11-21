@@ -13,6 +13,34 @@ export async function listSites(): Promise<SiteDto[]> {
   return await request.get('/attendance/sites') as SiteDto[]
 }
 
+export interface WorkerDto {
+  id: string
+  name: string
+  employeeId: string | null
+  dailyWage: number
+  isActive: boolean
+}
+
+/** 考勤卡同步時選員工用；日薪就是計薪用的日薪。 */
+export async function listWorkers(): Promise<WorkerDto[]> {
+  return await request.get('/attendance/workers') as WorkerDto[]
+}
+
+/** 卡上手寫姓名對不上任何員工時，直接用該姓名建一個工人。 */
+export async function createWorker(payload: { name: string; employeeId?: string | null; dailyWage: number }): Promise<WorkerDto> {
+  return (await request.post('/attendance/workers', payload)) as WorkerDto
+}
+
+/** 改員工的姓名 / 工號 / 日薪 / 在職；只送有改的欄位。 */
+export async function updateWorker(id: string, payload: { name?: string; employeeId?: string | null; dailyWage?: number; isActive?: boolean }): Promise<WorkerDto> {
+  return (await request.put(`/attendance/workers/${id}`, payload)) as WorkerDto
+}
+
+/** 刪除員工（軟刪除）：已入庫的打卡明細和薪酬保留，只是不再顯示。 */
+export async function deleteWorker(id: string): Promise<void> {
+  await request.delete(`/attendance/workers/${id}`)
+}
+
 export interface PayrollFields {
   workDays: number
   laborLeaveDays: number
@@ -55,7 +83,8 @@ export interface PunchDto extends PunchFields {
 export interface AttendanceQuery {
   year: number
   month: number
-  name?: string
+  /** 只看某個員工；不填就是全部（姓名下拉選的是員工 id，重名不會混）。 */
+  workerId?: string
   page: number
   pageSize: number
 }
@@ -167,6 +196,41 @@ export async function updateCardScan(id: string, payload: CardScanEdit): Promise
   return (await request.put(`/attendance/scans/${id}`, payload)) as AttendanceCardScanDto
 }
 
+/**
+ * 標記為已核對：清掉卡片層複核標記，狀態由「需覆核」變「已識別」，時間欄不改。
+ * includeHandwritten 為 true 時連手寫的年月姓名一併判定（低置信度仍會保留需覆核）。
+ */
+export async function confirmCardScan(id: string, includeHandwritten = false): Promise<AttendanceCardScanDto> {
+  return (await request.post(`/attendance/scans/${id}/confirm`, { includeHandwritten })) as AttendanceCardScanDto
+}
+
 export async function deleteCardScan(id: string): Promise<void> {
   await request.delete(`/attendance/scans/${id}`)
+}
+
+/** 同步結果：寫入幾筆打卡明細，以及重算後的薪酬表內容。 */
+export interface CardSyncResult {
+  scanId: string
+  year: number
+  month: number
+  workerId: string
+  workerName: string
+  siteId: string
+  siteName: string
+  addedRecords: number
+  workDays: number
+  laborLeaveDays: number
+  totalWorkDays: number
+  overtimeHours: number
+  dailyWage: number
+  overtimeAmount: number
+  mpfEmployer: number
+  mpfEmployee: number
+  actualPay: number
+  totalAmount: number
+}
+
+/** 把識別結果導入打卡明細（員工、地盤由使用者選），並重算該員工該月的薪酬表。 */
+export async function syncCardScan(id: string, payload: { workerId: string; siteId: string }): Promise<CardSyncResult> {
+  return (await request.post(`/attendance/scans/${id}/sync`, payload)) as CardSyncResult
 }

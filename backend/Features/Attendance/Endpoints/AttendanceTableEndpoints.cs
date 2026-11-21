@@ -21,18 +21,18 @@ public static class AttendanceTableEndpoints
         => year is >= 2000 and <= 2099 && month is >= 1 and <= 12 && page is >= 1 and <= 100000 && pageSize is >= 1 and <= 100;
 
     private static async Task<Results<Ok<PagedResult<PayrollDto>>, ValidationProblem>> GetPayrollAsync(
-        int year, int month, AttendanceTableService svc, CancellationToken ct, string? name = null, int page = 1, int pageSize = 20)
+        int year, int month, AttendanceTableService svc, CancellationToken ct, Guid? workerId = null, int page = 1, int pageSize = 20)
     {
         if (!ValidQuery(year, month, page, pageSize)) return InvalidQuery();
-        var result = await svc.GetPayrollAsync(year, month, name, page, pageSize, ct);
+        var result = await svc.GetPayrollAsync(year, month, workerId, page, pageSize, ct);
         return TypedResults.Ok(new PagedResult<PayrollDto>(result.Items.Select(PayrollDto.From).ToList(), result.Total, page, pageSize));
     }
 
     private static async Task<Results<Ok<PagedResult<PunchDto>>, ValidationProblem>> GetPunchesAsync(
-        int year, int month, AttendanceTableService svc, CancellationToken ct, string? name = null, int page = 1, int pageSize = 20)
+        int year, int month, AttendanceTableService svc, CancellationToken ct, Guid? workerId = null, int page = 1, int pageSize = 20)
     {
         if (!ValidQuery(year, month, page, pageSize)) return InvalidQuery();
-        var result = await svc.GetPunchesAsync(year, month, name, page, pageSize, ct);
+        var result = await svc.GetPunchesAsync(year, month, workerId, page, pageSize, ct);
         return TypedResults.Ok(new PagedResult<PunchDto>(result.Items.Select(PunchDto.From).ToList(), result.Total, page, pageSize));
     }
 
