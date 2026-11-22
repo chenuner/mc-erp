@@ -137,7 +137,7 @@ frontend/
 - 主鍵：`Guid` 類型，字段名 `id`
 - 審計字段：`created_at` / `updated_at`
 - 軟刪除：`is_deleted` + `deleted_at`（僅需要軟刪除的實體）
-- **不建外鍵（死規定）**：資料庫一律不建 `FOREIGN KEY` 約束。EF 的導航屬性、`Include()` 聯表 SQL 由模型生成，不依賴資料庫約束；清表、刪資料不受約束順序限制。新增關聯時只加欄位 + `HasOne/HasMany`，若 migration 仍產生 FK，就在同一支 migration 用 `ALTER TABLE ... DROP CONSTRAINT IF EXISTS` 補掉；資料完整性由程式保證（寫入前先查存在）。既有約束由 `20261122091500_DropAllForeignKeys` 一次清掉（含殘留的 Hangfire 表）。
+- **不建外鍵（死規定）**：資料庫一律不建 `FOREIGN KEY` 約束。EF 的導航屬性、`Include()` 聯表 SQL 由模型生成，不依賴資料庫約束；清表、刪資料不受約束順序限制。新增關聯時只加欄位 + `HasOne/HasMany`，若 migration 仍產生 FK，就在同一支 migration 用 `ALTER TABLE ... DROP CONSTRAINT IF EXISTS` 補掉；資料完整性由程式保證（寫入前先查存在）。
 
 ---
 
