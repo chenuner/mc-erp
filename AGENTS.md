@@ -21,6 +21,10 @@ MC ERP — 香港建築管理公司 ERP 系統。簡單系統，不過度工程�
 5. **不暴露後端端口** — Nginx 統一入口。
 6. **C# 14 語法糖** — 構造函數參數注入、primary constructor 等。
 7. **不按環境分叉行為** — 不自行新增 `IsDevelopment()` / `IsProduction()` 分支來關閉功能；本地與生產保持一致。若認為必要，先停下來提醒維護者確認。
+8. **不要外鍵（死規定）** — 資料庫**一律不建 FOREIGN KEY 約束**。EF 的導航屬性、`Include()`、關聯 DTO 照用，聯表 SQL 由模型生成，不需要資料庫約束；刪資料、清表也不該受約束順序限制。
+   - 新增實體或關聯時：只建欄位 + `HasOne/HasMany` 導航，**不要讓 migration 產生 FK**；若 EF 已產生，就在同一個 migration 用 raw SQL `ALTER TABLE ... DROP CONSTRAINT IF EXISTS ...` 補掉。
+   - 既有資料庫用 [20261122091500_DropAllForeignKeys](backend/Migrations/20261122091500_DropAllForeignKeys.cs) 一次清掉全部 FK；新環境由這支 migration 在最後把約束刪掉。
+   - 資料完整性由程式保證（寫入前先查存在），不要靠資料庫約束。
 
 ---
 
