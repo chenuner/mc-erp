@@ -30,6 +30,12 @@ public sealed class AttendanceCardScan : AuditableEntity
     /// </summary>
     public List<string> ReviewFields { get; set; } = [];
 
+    /// <summary>
+    /// 人工按「標記為已核對」的時間。null 表示還沒核對，同步到打卡明細會被拒絕；
+    /// 核對之後再改動識別結果會清空，要求重新核對。
+    /// </summary>
+    public DateTime? ConfirmedAt { get; set; }
+
     /// <summary>掃描使用的原圖，存 storage_files；用於回看對照，不重複存儲。</summary>
     public Guid? FileItemId { get; set; }
     public FileItem? FileItem { get; set; }

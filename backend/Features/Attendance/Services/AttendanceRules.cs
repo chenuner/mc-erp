@@ -32,7 +32,7 @@ public static class AttendanceRules
     /// 卡上是香港時間，存庫一律換成 UTC；下班早於上班代表跨過午夜，往後推一天。
     /// 加班時數另計到 <see cref="AttendanceRecord.OvertimeHours"/>，不影響上下班時間。
     /// </summary>
-    public static AttendanceRecord ToRecord(int year, int month, AttendanceCardPunch punch, Guid workerId, Guid siteId)
+    public static AttendanceRecord ToRecord(int year, int month, AttendanceCardPunch punch, Guid workerId, Guid siteDictId)
     {
         var start = punch.AmIn ?? punch.PmIn ?? punch.OtIn
             ?? throw new InvalidOperationException($"第 {punch.Day} 日沒有任何打卡時間");
@@ -46,7 +46,7 @@ public static class AttendanceRules
         return new AttendanceRecord
         {
             WorkerId = workerId,
-            SiteId = siteId,
+            SiteDictId = siteDictId,
             ClockInTime = clockIn,
             ClockOutTime = clockOut,
             OvertimeHours = OvertimeHoursOf(punch),

@@ -55,6 +55,10 @@ public sealed class SysDictRepository(ErpDbContext db) : ISysDictRepository
         if (dict.GroupName == "AttendancePosition"
             && await db.Workers.IgnoreQueryFilters().AnyAsync(worker => worker.PositionDictId == dict.Id, ct))
             throw new InvalidOperationException("職位分類已被員工引用，請停用而不要刪除");
+        // 地盤是考勤和會計共用的分組：被打卡明細引用時不能刪，否則明細會跟着消失；要隱藏請停用
+        if (dict.GroupName == "AccountingSiteCategory"
+            && await db.AttendanceRecords.IgnoreQueryFilters().AnyAsync(record => record.SiteDictId == dict.Id, ct))
+            throw new InvalidOperationException("地盤已被打卡明細引用，請停用而不要刪除");
         dict.IsDeleted = true;
         dict.DeletedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);

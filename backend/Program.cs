@@ -109,7 +109,6 @@ builder.Services.AddScoped<RoleService>();
 // Attendance 模塊
 builder.Services.AddScoped<IAttendanceRepository, AttendanceRepository>();
 builder.Services.AddScoped<AttendanceServices>();
-builder.Services.AddScoped<IExternalAttendanceApi, ExternalAttendanceApi>();
 builder.Services.AddScoped<AttendanceTableService>();
 builder.Services.AddScoped<AttendanceCardService>();
 

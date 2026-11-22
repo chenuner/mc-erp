@@ -11,8 +11,7 @@ public interface IAttendanceRepository
     Task UpdateWorkerAsync(Worker worker, CancellationToken ct = default);
 
     // Site
-    Task<List<Site>> GetAllSitesAsync(CancellationToken ct = default);
-    Task AddSiteAsync(Site site, CancellationToken ct = default);
+    // 地盤是系統字典項（AccountingSiteCategory），由 SysDict 維護，不再有獨立的地盤表
 
     // AttendanceRecord
     Task<List<AttendanceRecord>> GetRecordsAsync(Guid workerId, DateTime start, DateTime end, CancellationToken ct = default);

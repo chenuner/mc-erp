@@ -18,7 +18,6 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
 
     // Attendance
     public DbSet<Worker> Workers => Set<Worker>();
-    public DbSet<Site> Sites => Set<Site>();
     public DbSet<AttendanceRecord> AttendanceRecords => Set<AttendanceRecord>();
     public DbSet<MonthlyWorkSummary> MonthlyWorkSummaries => Set<MonthlyWorkSummary>();
     public DbSet<AttendanceCardScan> AttendanceCardScans => Set<AttendanceCardScan>();
@@ -121,22 +120,17 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        modelBuilder.Entity<Site>(e =>
-        {
-            e.ToTable("attendance_sites");
-            e.HasQueryFilter(s => !s.IsDeleted);
-            e.HasIndex(s => s.Name);
-            e.HasMany(s => s.Records)
-                .WithOne(r => r.Site)
-                .HasForeignKey(r => r.SiteId);
-        });
-
         modelBuilder.Entity<AttendanceRecord>(e =>
         {
             e.ToTable("attendance_records");
             e.Property(r => r.OvertimeHours).HasPrecision(8, 2);
             e.Property(r => r.Remark).HasMaxLength(255);
             e.HasIndex(r => new { r.WorkerId, r.ClockInTime });
+            // 地盤是系統字典項（AccountingSiteCategory）；資料庫不建外鍵，靠程式驗證（migration 會移除 EF 產生的 FK）
+            e.HasOne(r => r.Site)
+                .WithMany()
+                .HasForeignKey(r => r.SiteDictId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<MonthlyWorkSummary>(e =>

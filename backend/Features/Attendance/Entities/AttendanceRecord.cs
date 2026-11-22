@@ -1,4 +1,5 @@
 using MC.Erp.Common.Domain;
+using MC.Erp.Features.System.Entities;
 
 namespace MC.Erp.Features.Attendance.Entities;
 
@@ -12,10 +13,10 @@ public sealed class AttendanceRecord : Entity
     /// <summary>員工資料的導航屬性。</summary>
     public Worker Worker { get; set; } = null!;
 
-    /// <summary>地盤 ID。</summary>
-    public Guid SiteId { get; set; }
-    /// <summary>地盤資料的導航屬性。</summary>
-    public Site Site { get; set; } = null!;
+    /// <summary>地盤（系統字典 AccountingSiteCategory 的字典項 ID）。</summary>
+    public Guid SiteDictId { get; set; }
+    /// <summary>地盤字典項的導航屬性，不新增資料庫欄位。</summary>
+    public SysDict Site { get; set; } = null!;
 
     /// <summary>上班打卡時間，資料庫使用 UTC，前端按香港時間展示。</summary>
     public DateTime ClockInTime { get; set; }
