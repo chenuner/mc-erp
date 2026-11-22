@@ -246,6 +246,9 @@ namespace MC.Erp.Migrations
                         .HasPrecision(8, 2)
                         .HasColumnType("numeric(8,2)");
 
+                    b.Property<Guid?>("PositionDictId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Remark")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
@@ -257,6 +260,8 @@ namespace MC.Erp.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("PositionDictId");
 
                     b.HasIndex("SiteDictId");
 
@@ -313,6 +318,13 @@ namespace MC.Erp.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
+                    b.Property<string>("Site")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid?>("SiteDictId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal>("TotalAmount")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
@@ -333,8 +345,8 @@ namespace MC.Erp.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("WorkerId", "Year", "Month")
-                        .IsUnique();
+                    b.HasIndex("WorkerId", "Year", "Month", "PositionDictId", "SiteDictId")
+                        .HasDatabaseName("idx_attendance_summary_worker_month_group");
 
                     b.ToTable("attendance_monthly_summaries", (string)null);
                 });
@@ -741,6 +753,11 @@ namespace MC.Erp.Migrations
 
             modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.AttendanceRecord", b =>
                 {
+                    b.HasOne("MC.Erp.Features.System.Entities.SysDict", "Position")
+                        .WithMany()
+                        .HasForeignKey("PositionDictId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("MC.Erp.Features.System.Entities.SysDict", "Site")
                         .WithMany()
                         .HasForeignKey("SiteDictId")
@@ -752,6 +769,8 @@ namespace MC.Erp.Migrations
                         .HasForeignKey("WorkerId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Position");
 
                     b.Navigation("Site");
 

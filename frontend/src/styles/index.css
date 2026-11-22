@@ -177,6 +177,50 @@ body {
   }
 }
 
+/* 表格合計行（薪酬表、會計收據共用）
+   做法：不用主色粗線，改用「抬高卡片」的手法 —— 淺灰底 + 上緣細線 + 輕陰影，
+   和明細的斑馬紋區分開，又不搶走金額本身的注意力。滾動時釘在底部。 */
+.mc-table-summary {
+  --mc-summary-bg: #F2F4F7;
+}
+
+.mc-table-summary .el-table__footer-wrapper {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+}
+
+.mc-table-summary .el-table__footer-wrapper td.el-table__cell {
+  background: var(--mc-summary-bg);
+  border-top: 1px solid var(--mc-border);
+  border-bottom: 2px solid var(--mc-border);
+  color: var(--mc-text);
+  padding: 10px 0;
+}
+
+/* 固定列（姓名、操作）底色要跟上，否則會透出下面的明細 */
+.mc-table-summary .el-table__footer-wrapper td.el-table__cell.is-fixed-right,
+.mc-table-summary .el-table__footer-wrapper td.el-table__cell.is-fixed-left {
+  background: var(--mc-summary-bg);
+}
+
+.mc-table-summary .el-table__footer-wrapper .cell {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: normal;
+  line-height: 1.5;
+}
+
+/* 第一格是標籤（「合計（N 人）」），用次要色弱化，把視線留給數字 */
+.mc-table-summary .el-table__footer-wrapper tr > td.el-table__cell:not([colspan]) .cell {
+  color: var(--mc-text-secondary);
+}
+
+.mc-table-summary .el-table__footer-wrapper tr:first-child > td.el-table__cell:first-child .cell {
+  color: var(--mc-text);
+  font-weight: 700;
+}
+
 /* 細滾動條 */
 ::-webkit-scrollbar {
   width: 6px;

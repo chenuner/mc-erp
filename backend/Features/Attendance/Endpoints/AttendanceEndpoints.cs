@@ -23,12 +23,8 @@ public static class AttendanceEndpoints
 
         // 地盤：系統字典（AccountingSiteCategory）維護，不再有 /sites 端點
 
-        // 打卡記錄
-        group.MapGet("/records/{workerId:guid}", GetRecordsAsync).RequireAuthorization();
-
         // 考勤卡掃描：掃描即落庫，可再查詢、人工修正及刪除
         group.MapPost("/scan", ScanCardAsync).RequireAuthorization("admin").DisableAntiforgery();
-        group.MapPost("/scan/url", ScanCardUrlAsync).RequireAuthorization("admin");
         group.MapGet("/scans", ListCardScansAsync).RequireAuthorization();
         group.MapGet("/scans/{id:guid}", GetCardScanAsync).RequireAuthorization();
         group.MapPut("/scans/{id:guid}", UpdateCardScanAsync).RequireAuthorization("admin");
@@ -38,11 +34,7 @@ public static class AttendanceEndpoints
         // 同步：把識別結果導入打卡明細，並重算該員工該月的薪酬表
         group.MapPost("/scans/{id:guid}/sync", SyncCardAsync).RequireAuthorization("admin");
 
-        // 月結工數表
-        group.MapGet("/summaries", GetSummariesAsync).RequireAuthorization();
-        group.MapGet("/summaries/{workerId:guid}", GetWorkerSummaryAsync).RequireAuthorization();
-
-        // 薪酬表（含人工迴寫）與模擬數據
+        // 薪酬表（含人工迴寫）
         group.MapAttendanceTableEndpoints();
     }
 
@@ -74,24 +66,10 @@ public static class AttendanceEndpoints
         return TypedResults.NoContent();
     }
 
-    // --- 打卡記錄 ---
-    private static async Task<Ok<List<RecordDto>>> GetRecordsAsync(
-        Guid workerId, DateTime? start, DateTime? end, AttendanceServices svc, CancellationToken ct)
-    {
-        var to = end ?? DateTime.UtcNow;
-        var from = start ?? to.AddDays(-30);
-        var records = await svc.GetRecordsAsync(workerId, from, to, ct);
-        return TypedResults.Ok(records.Select(RecordDto.From).ToList());
-    }
-
     // --- 考勤卡掃描 ---
     private static async Task<Ok<AttendanceCardScanDto>> ScanCardAsync(
         IFormFile file, AttendanceCardService svc, CancellationToken ct)
         => TypedResults.Ok(await svc.ScanAsync(file, ct));
-
-    private static async Task<Ok<AttendanceCardScanDto>> ScanCardUrlAsync(
-        ScanUrlRequest request, AttendanceCardService svc, CancellationToken ct)
-        => TypedResults.Ok(await svc.ScanAsync(request.Url, ct));
 
     private static bool ValidScanQuery(int? year, int? month, int page, int pageSize)
         => (year is null or >= 2000 and <= 2099) && (month is null or >= 1 and <= 12)
@@ -134,23 +112,12 @@ public static class AttendanceEndpoints
     /// <summary>把識別結果導入打卡明細（員工、地盤由使用者指定），並重算該員工該月的薪酬表。</summary>
     private static async Task<Ok<CardSyncResultDto>> SyncCardAsync(
         Guid id, SyncCardRequest request, AttendanceCardService svc, CancellationToken ct)
-        => TypedResults.Ok(await svc.SyncAsync(id, request, ct));
-
-    // --- 月結 ---
-    private static async Task<Ok<List<SummaryDto>>> GetSummariesAsync(
-        int year, int month, AttendanceServices svc, CancellationToken ct)
     {
-        var summaries = await svc.GetSummariesAsync(year, month, ct);
-        return TypedResults.Ok(summaries.Select(SummaryDto.From).ToList());
+        var result = await svc.SyncAsync(id, request, ct);
+        return TypedResults.Ok(new CardSyncResultDto(result.ScanId, result.Year, result.Month, result.WorkerId,
+            result.WorkerName, result.SiteDictId, result.SiteName, result.AddedRecords,
+            result.Summaries.Select(CardPayrollRowDto.From).ToList()));
     }
-
-    private static async Task<Results<Ok<SummaryDto>, NotFound>> GetWorkerSummaryAsync(
-        Guid workerId, int year, int month, AttendanceServices svc, CancellationToken ct)
-    {
-        var summary = await svc.GetSummaryAsync(workerId, year, month, ct);
-        return summary is null ? TypedResults.NotFound() : TypedResults.Ok(SummaryDto.From(summary));
-    }
-
 }
 
 // DTOs
@@ -160,19 +127,23 @@ public sealed record WorkerDto(Guid Id, string Name, string? EmployeeId, decimal
     public static WorkerDto From(Worker w) => new(w.Id, w.Name, w.EmployeeId, w.DailyWage, w.IsActive,
         w.PositionDictId, w.Position?.Label);
 }
-public sealed record RecordDto(Guid Id, Guid WorkerId, Guid SiteDictId, DateTime ClockInTime, DateTime? ClockOutTime, decimal OvertimeHours, bool IsLaborLeave, string? Remark)
-{
-    public static RecordDto From(AttendanceRecord r) => new(r.Id, r.WorkerId, r.SiteDictId, r.ClockInTime, r.ClockOutTime, r.OvertimeHours, r.IsLaborLeave, r.Remark);
-}
-public sealed record SummaryDto(Guid Id, Guid WorkerId, int Year, int Month, decimal WorkDays, decimal LaborLeaveDays, decimal TotalWorkDays, decimal OvertimeHours, decimal DailyWage, decimal OvertimeAmount, decimal MpfEmployer, decimal MpfEmployee, decimal ActualPay, decimal TotalAmount, string? Remark)
-{
-    public static SummaryDto From(MonthlyWorkSummary s) => new(s.Id, s.WorkerId, s.Year, s.Month, s.WorkDays, s.LaborLeaveDays, s.TotalWorkDays, s.OvertimeHours, s.DailyWage, s.OvertimeAmount, s.MpfEmployer, s.MpfEmployee, s.ActualPay, s.TotalAmount, s.Remark);
-}
 
 public sealed record CreateWorkerRequest([Required, MaxLength(50)] string Name, [MaxLength(50)] string? EmployeeId,
     [Range(typeof(decimal), "0", "999999.99")] decimal DailyWage, Guid? PositionId = null);
 /// <summary>員工管理：只改有給的欄位（姓名、工號、日薪、在職、職位分類）；positionId 傳空 Guid 代表清空職位。</summary>
 public sealed record UpdateWorkerRequest([MaxLength(50)] string? Name, [MaxLength(50)] string? EmployeeId,
     [Range(typeof(decimal), "0", "999999.99")] decimal? DailyWage, bool? IsActive, Guid? PositionId = null);
-/// <summary>考勤卡圖片連結；必須是 https，由 Azure 直接拉取。</summary>
-public sealed record ScanUrlRequest([Required] string Url);
+
+/// <summary>同步後該員工該月薪酬表的一行（按職位 × 地盤分組）；員工資訊在結果頂層。</summary>
+public sealed record CardPayrollRowDto(Guid Id, Guid? PositionDictId, string? Position, Guid? SiteDictId, string? Site,
+    decimal WorkDays, decimal LaborLeaveDays, decimal TotalWorkDays, decimal OvertimeHours, decimal DailyWage,
+    decimal OvertimeAmount, decimal MpfEmployer, decimal MpfEmployee, decimal ActualPay, decimal TotalAmount)
+{
+    public static CardPayrollRowDto From(MonthlyWorkSummary row) => new(row.Id, row.PositionDictId, row.Position,
+        row.SiteDictId, row.Site, row.WorkDays, row.LaborLeaveDays, row.TotalWorkDays, row.OvertimeHours,
+        row.DailyWage, row.OvertimeAmount, row.MpfEmployer, row.MpfEmployee, row.ActualPay, row.TotalAmount);
+}
+
+/// <summary>同步結果：寫入幾筆打卡明細，以及重算後該員工該月薪酬表的行（按職位 × 地盤分組，可能多行）。</summary>
+public sealed record CardSyncResultDto(Guid ScanId, int Year, int Month, Guid WorkerId, string WorkerName,
+    Guid SiteDictId, string SiteName, int AddedRecords, List<CardPayrollRowDto> Rows);

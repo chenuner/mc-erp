@@ -418,7 +418,7 @@ onBeforeUnmount(revokeImage)
     <section class="results">
       <div class="result-heading"><span>{{ total }} 張票據</span><el-button text :disabled="busy" @click="load()"><AppIcon name="refresh-cw" :size="16" />刷新</el-button></div>
       <el-table v-loading="loading" :data="rows" stripe max-height="600" empty-text="沒有符合條件的票據"
-        :show-summary="rows.length > 0" :summary-method="receiptSummary">
+        class="mc-table-summary" :show-summary="rows.length > 0" :summary-method="receiptSummary">
         <el-table-column prop="receiptDate" label="票據日期" width="120"><template #default="{ row }">{{ row.receiptDate || '未填寫' }}</template></el-table-column>
         <el-table-column prop="merchantName" label="商戶 / 供應商" min-width="160" show-overflow-tooltip />
         <el-table-column prop="siteCategoryLabel" label="地盤分類" min-width="145" show-overflow-tooltip />
@@ -527,8 +527,7 @@ onBeforeUnmount(revokeImage)
 .results { background: var(--el-bg-color); border-top: 1px solid var(--el-border-color); min-width: 0; }
 .result-heading { padding: 12px 16px; }
 .el-pagination { padding: 16px 0; justify-content: flex-end; flex-wrap: wrap; }
-.results :deep(.el-table__footer-wrapper td) { background: var(--el-fill-color-light); }
-.results :deep(.el-table__footer-wrapper .cell) { font-weight: 500; font-variant-numeric: tabular-nums; white-space: normal; line-height: 1.5; }
+/* 合計行樣式在 styles/index.css 的 .mc-table-summary（和薪酬表共用） */
 .number, .md5 { font-variant-numeric: tabular-nums; }
 .file-input { display: none; }
 .detail-status { margin-bottom: 16px; }

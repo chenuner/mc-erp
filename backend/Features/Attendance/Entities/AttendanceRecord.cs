@@ -18,6 +18,14 @@ public sealed class AttendanceRecord : Entity
     /// <summary>地盤字典項的導航屬性，不新增資料庫欄位。</summary>
     public SysDict Site { get; set; } = null!;
 
+    /// <summary>
+    /// 當天的職位分類（AttendancePosition 字典項）；同步考勤卡時取員工當下的職位。
+    /// 職位和地盤一起決定薪酬表的分組行，所以必須記在明細上而不是只留在員工身上。
+    /// </summary>
+    public Guid? PositionDictId { get; set; }
+    /// <summary>職位分類的字典導航屬性，不新增資料庫欄位。</summary>
+    public SysDict? Position { get; set; }
+
     /// <summary>上班打卡時間，資料庫使用 UTC，前端按香港時間展示。</summary>
     public DateTime ClockInTime { get; set; }
     /// <summary>下班打卡時間（UTC）；未打卡或勞工假時可為空。</summary>

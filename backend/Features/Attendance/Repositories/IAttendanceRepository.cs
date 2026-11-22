@@ -13,10 +13,5 @@ public interface IAttendanceRepository
     // Site
     // 地盤是系統字典項（AccountingSiteCategory），由 SysDict 維護，不再有獨立的地盤表
 
-    // AttendanceRecord
-    Task<List<AttendanceRecord>> GetRecordsAsync(Guid workerId, DateTime start, DateTime end, CancellationToken ct = default);
-
-    // MonthlyWorkSummary
-    Task<MonthlyWorkSummary?> GetSummaryAsync(Guid workerId, int year, int month, CancellationToken ct = default);
-    Task<List<MonthlyWorkSummary>> GetSummariesByMonthAsync(int year, int month, CancellationToken ct = default);
+    // 打卡明細與薪酬表查詢由 AttendanceTableService 直接用 DbContext 處理（列表、合計共用同一份篩選）
 }

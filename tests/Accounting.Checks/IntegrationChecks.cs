@@ -176,7 +176,19 @@ internal static class IntegrationChecks
 
             var first = await Upload(documentId, png);
             var second = await Upload(secondDocumentId, png);
-            Check(first.Md5 == Convert.ToHexStringLower(MD5.HashData(png)) && second.Md5 == first.Md5, "MD5 retained without deduplication");
+            Check(first.Md5 == Convert.ToHexStringLower(MD5.HashData(png)) && second.Md5 == first.Md5,
+                "MD5 is recorded and identical uploads share it");
+            // 按 MD5 去重：兩筆記錄各有一行元數據，但磁盤上只有一份文件
+            await using (var dedupe = new NpgsqlConnection(isolatedConnection))
+            {
+                await dedupe.OpenAsync();
+                await using var distinctStoredNames = new NpgsqlCommand(
+                    """SELECT count(DISTINCT "StoredName") FROM storage_files WHERE "Id" IN (@first, @second)""", dedupe);
+                distinctStoredNames.Parameters.AddWithValue("first", first.FileItemId!.Value);
+                distinctStoredNames.Parameters.AddWithValue("second", second.FileItemId!.Value);
+                Check(Convert.ToInt64(await distinctStoredNames.ExecuteScalarAsync()) == 1L,
+                    "identical content is written to disk once");
+            }
             Check(first.Amount == null && first.ReceiptDate == null, "new receipt has no date or amount");
             using (var missing = await client.PostAsync($"accounting/receipts/{first.Id}/recognize", null)) Check(missing.StatusCode == HttpStatusCode.BadRequest, "OCR unavailable preserves draft");
             using (var image = await client.GetAsync($"accounting/receipts/{first.Id}/image")) Check((await image.Content.ReadAsByteArrayAsync()).SequenceEqual(png), "original retained");
@@ -291,6 +303,9 @@ internal static class IntegrationChecks
                 Check(goneImage.StatusCode == HttpStatusCode.NotFound, "deleted receipt image gone");
             using (var goneFile = await client.GetAsync($"storage/files/{doomedFileId}/download"))
                 Check(goneFile.StatusCode == HttpStatusCode.NotFound, "deleted receipt original cleaned up");
+            // 去重後這個物理文件還被 first / second 共用，刪掉一筆記錄不能連別人的圖一起刪
+            using (var sharedOriginal = await client.GetAsync($"storage/files/{first.FileItemId}/download"))
+                Check(sharedOriginal.StatusCode == HttpStatusCode.OK, "shared physical file survives deleting one of its records");
             using (var again = await client.DeleteAsync($"accounting/receipts/{doomed.Id}"))
                 Check(again.StatusCode == HttpStatusCode.NotFound, "deleting missing receipt rejected");
 

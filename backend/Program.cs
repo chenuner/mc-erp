@@ -1,5 +1,6 @@
 using System.Text;
 using MC.Erp.Common;
+using MC.Erp.Common.Errors;
 using MC.Erp.Common.Security;
 using MC.Erp.Common.Infrastructure.Ocr;
 using MC.Erp.Features.Accounting.Endpoints;
@@ -136,11 +137,14 @@ builder.Services.AddProblemDetails();
 // 輸入驗證：DataAnnotations 對所有 endpoint 自動生效，失敗回 400 ValidationProblem
 builder.Services.AddValidation();
 
+// 查詢字串的空值/格式錯誤在端點執行前就由 Minimal API 的參數綁定拋出，
+// ExceptionProblemFilter 攔不到（它包在端點外面），所以在全域把 BadHttpRequestException 轉成 400。
+builder.Services.AddExceptionHandler<BadRequestExceptionHandler>();
+
 var app = builder.Build();
 
 // 異常處理
-app.UseExceptionHandler();
-// 無 body 的 4xx/5xx 也轉成 ProblemDetails
+app.UseExceptionHandler();// 無 body 的 4xx/5xx 也轉成 ProblemDetails
 app.UseStatusCodePages();
 
 // 認證 & 授權

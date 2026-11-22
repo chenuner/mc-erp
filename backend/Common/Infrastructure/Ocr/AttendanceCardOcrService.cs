@@ -8,12 +8,7 @@ public interface IAttendanceCardOcrService
 {
     bool IsConfigured { get; }
 
-    Task<AttendanceCard> ScanAsync(Stream content);
-
     Task<AttendanceCard> ScanAsync(byte[] content);
-
-    /// <summary>由 Azure 直接拉取圖片（連結必須公網可訪問），本服務不下載。</summary>
-    Task<AttendanceCard> ScanAsync(Uri url);
 }
 
 /// <summary>
@@ -26,23 +21,10 @@ public sealed class AzureAttendanceCardOcrService(DocumentIntelligenceClientProv
 
     public bool IsConfigured => provider.IsConfigured;
 
-    public async Task<AttendanceCard> ScanAsync(Stream content)
-    {
-        using var timeout = provider.TimeoutSource();
-        var bytes = await BinaryData.FromStreamAsync(content, timeout.Token);
-        return await AnalyzeAsync(new AnalyzeDocumentOptions(Model, bytes), timeout.Token);
-    }
-
     public async Task<AttendanceCard> ScanAsync(byte[] content)
     {
         using var timeout = provider.TimeoutSource();
         return await AnalyzeAsync(new AnalyzeDocumentOptions(Model, BinaryData.FromBytes(content)), timeout.Token);
-    }
-
-    public async Task<AttendanceCard> ScanAsync(Uri url)
-    {
-        using var timeout = provider.TimeoutSource();
-        return await AnalyzeAsync(new AnalyzeDocumentOptions(Model, url), timeout.Token);
     }
 
     /// <summary>

@@ -212,6 +212,8 @@ function onPreviewSwitch(index: number) {
 }
 
 function previewCacheKey(file: FileDto): string {
+  // 按內容（MD5）做快取鍵：上傳已按 MD5 去重，同內容只下載、只快取一份；
+  // 歷史資料沒有 MD5 時退回按 id
   return file.md5?.toLowerCase() ?? `id:${file.id}`
 }
 
@@ -243,7 +245,7 @@ async function loadPreviewImage(index: number, session = previewSession, showLoa
   if (showLoading) previewLoading.value = true
   let request = previewRequests.get(cacheKey)
   if (!request) {
-    const pending = getFileBlob(file.id, file.md5)
+    const pending = getFileBlob(file.id)
       .then((blob) => {
         const url = URL.createObjectURL(blob)
         if (session !== previewSession || !previewVisible.value) {
@@ -293,7 +295,7 @@ watch(
     )
     for (const f of pending) {
       try {
-        const blob = await getFileBlob(f.id, f.md5)
+        const blob = await getFileBlob(f.id)
         thumbUrls[f.id] = URL.createObjectURL(blob)
       } catch {
         /* 忽略單個失敗 */

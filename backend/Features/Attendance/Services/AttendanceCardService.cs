@@ -207,25 +207,19 @@ public static class CardReviewRules
 /// <summary>同步到打卡明細的目標：哪個員工、哪個地盤（地盤是系統字典 AccountingSiteCategory 的字典項；卡上只有手寫姓名，由使用者自己配對）。</summary>
 public sealed record SyncCardRequest(Guid WorkerId, Guid SiteDictId);
 
-/// <summary>同步結果：今次寫入幾筆打卡明細，以及重算後的薪酬表內容。</summary>
-public sealed record CardSyncResultDto(Guid ScanId, int Year, int Month, Guid WorkerId, string WorkerName,
-    Guid SiteDictId, string SiteName, int AddedRecords, decimal WorkDays, decimal LaborLeaveDays,
-    decimal TotalWorkDays, decimal OvertimeHours, decimal DailyWage, decimal OvertimeAmount,
-    decimal MpfEmployer, decimal MpfEmployee, decimal ActualPay, decimal TotalAmount)
-{
-    public static CardSyncResultDto From(AttendanceCardScan scan, Worker worker, SysDict site, int added,
-        MonthlyWorkSummary summary) => new(scan.Id, summary.Year, summary.Month, worker.Id, worker.Name, site.Id,
-        site.Label, added, summary.WorkDays, summary.LaborLeaveDays, summary.TotalWorkDays, summary.OvertimeHours,
-        summary.DailyWage, summary.OvertimeAmount, summary.MpfEmployer, summary.MpfEmployee, summary.ActualPay,
-        summary.TotalAmount);
-}
+/// <summary>
+/// 同步結果：今次寫入幾筆打卡明細，以及重算後該員工該月薪酬表的行。
+/// 薪酬按（職位 × 地盤）分組，所以同一張卡可能產生多行。
+/// </summary>
+public sealed record CardSyncResult(Guid ScanId, int Year, int Month, Guid WorkerId, string WorkerName,
+    Guid SiteDictId, string SiteName, int AddedRecords, IReadOnlyList<MonthlyWorkSummary> Summaries);
 
 /// <summary>
 /// 考勤卡掃描：沿用票據識別的 AZURE_DOC_ENDPOINT / AZURE_DOC_KEY（同一個 client、prebuilt-layout 模型）。
 /// 掃描即落庫：原圖進 storage_files，逐日明細進 attendance_card_punches，不存任何工時或合計。
 /// </summary>
 public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbContext db, FileService files,
-    SysDictService dicts, ILogger<AttendanceCardService> logger)
+    SysDictService dicts, AttendanceTableService tables, ILogger<AttendanceCardService> logger)
 {
     private const int MaxImageBytes = 4 * 1024 * 1024;
     private const string CardTypeGroup = "AttendanceCard";
@@ -243,14 +237,6 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
         var mime = CheckImage(content);
         var card = await ocr.ScanAsync(content);
         return await SaveAsync(card, content, Path.GetFileName(image.FileName), mime, ct);
-    }
-
-    /// <summary>連結由 Azure 拉取，服務端不下載（避免任意 URL 讀內網），所以沒有原圖可存。</summary>
-    public async Task<AttendanceCardScanDto> ScanAsync(string url, CancellationToken ct = default)
-    {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
-            throw new InvalidOperationException("請提供 https 圖片連結");
-        return await SaveAsync(await ocr.ScanAsync(uri), null, null, null, ct);
     }
 
     public async Task<(List<AttendanceCardScanSummaryDto> Items, int Total)> ListAsync(int? year, int? month,
@@ -336,11 +322,11 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
     }
 
     /// <summary>
-    /// 把一張考勤卡導入打卡明細，並按該員工該月的全部打卡明細重算薪酬表。
+    /// 把一張考勤卡導入打卡明細，並按該員工該月的全部打卡明細重算薪酬表（按職位 × 地盤分組出多行）。
     /// 前提是卡片已「標記為已核對」且沒有需覆核欄位，否則拒絕——先核對，再同步。
     /// 同一員工同一月再同步＝重算：先刪掉上次由考勤卡導入的明細再寫入，所以改完時間重按不會重複計工數。
     /// </summary>
-    public async Task<CardSyncResultDto> SyncAsync(Guid id, SyncCardRequest request, CancellationToken ct = default)
+    public async Task<CardSyncResult> SyncAsync(Guid id, SyncCardRequest request, CancellationToken ct = default)
     {
         if (request.WorkerId == Guid.Empty || request.SiteDictId == Guid.Empty)
             throw new InvalidOperationException("請選擇員工和地盤");
@@ -384,31 +370,21 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
             .ToListAsync(ct);
         var imported = existing.Where(record => record.Remark == AttendanceRules.ImportedRemark).ToList();
         db.AttendanceRecords.RemoveRange(imported);
-        existing = existing.Where(record => record.Remark != AttendanceRules.ImportedRemark).ToList();
 
-        var records = days.Select(punch => AttendanceRules.ToRecord(year, month, punch, worker.Id, site.Id)).ToList();
+        var records = days
+            .Select(punch => AttendanceRules.ToRecord(year, month, punch, worker.Id, site.Id, worker.PositionDictId))
+            .ToList();
         db.AttendanceRecords.AddRange(records);
-
-        // 薪酬按該月全部打卡明細重算；剛 Add 的和要刪的都還沒寫庫，用記憶體裡的清單算
-        var all = existing.Concat(records).ToList();
-        var summary = await db.MonthlyWorkSummaries
-            .FirstOrDefaultAsync(item => item.WorkerId == worker.Id && item.Year == year && item.Month == month, ct);
-        if (summary is null)
-        {
-            summary = new MonthlyWorkSummary { WorkerId = worker.Id, Year = year, Month = month, Remark = "由考勤卡自動計算" };
-            db.MonthlyWorkSummaries.Add(summary);
-        }
-        // 薪酬表記錄生成當下的職位快照；之後改員工職位不影響已生成的月份
-        summary.PositionDictId = worker.PositionDictId;
-        summary.Position = worker.Position?.Label;
-        // 勞工假不在卡上，ApplyPayroll 沿用薪酬表原有的值
-        AttendanceRules.ApplyPayroll(summary, worker.DailyWage, AttendanceRules.WorkDaysOf(all),
-            all.Sum(record => record.OvertimeHours));
-
+        // 先把明細寫庫，重算要用到「該月全部明細」（含其他來源的）再查一次比較單純
         await db.SaveChangesAsync(ct);
-        logger.LogInformation("考勤卡 {ScanId} 導入 {Count} 筆打卡明細給 {Worker}（替換 {Replaced} 筆），已重算 {Year}-{Month} 薪酬",
-            scan.Id, records.Count, worker.Name, imported.Count, year, month);
-        return CardSyncResultDto.From(scan, worker, site, records.Count, summary);
+
+        // 薪酬按該月全部打卡明細重算，按（職位 × 地盤）分組出多行
+        var summaries = await tables.RecomputePayrollAsync(worker.Id, year, month, ct);
+
+        logger.LogInformation("考勤卡 {ScanId} 導入 {Count} 筆打卡明細給 {Worker}（替換 {Replaced} 筆），已重算 {Year}-{Month} 薪酬（{Rows} 行）",
+            scan.Id, records.Count, worker.Name, imported.Count, year, month, summaries.Count);
+        return new CardSyncResult(scan.Id, year, month, worker.Id, worker.Name, site.Id, site.Label,
+            records.Count, summaries);
     }
 
     /// <summary>軟刪除掃描記錄並清理原圖；明細留在庫裡，恢復時仍可對上。</summary>
@@ -425,8 +401,8 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
         catch (Exception cleanup) { logger.LogWarning(cleanup, "Attendance card delete cleanup failed for {FileId}", file); }
     }
 
-    private async Task<AttendanceCardScanDto> SaveAsync(AttendanceCard card, byte[]? content, string? fileName,
-        string? mime, CancellationToken ct)
+    private async Task<AttendanceCardScanDto> SaveAsync(AttendanceCard card, byte[] content, string fileName,
+        string mime, CancellationToken ct)
     {
         var scan = new AttendanceCardScan
         {
@@ -439,9 +415,8 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
             ReviewFields = [.. card.ReviewFields],
             Punches = card.Records.Select(ToPunch).ToList()
         };
-        if (content is not null && fileName is not null && mime is not null)
+        using (var upload = new MemoryStream(content))
         {
-            using var upload = new MemoryStream(content);
             var file = await files.上传Async(await CardTypeAsync(ct), fileName, mime, content.Length, upload, ct);
             scan.FileItemId = file.Id;
             scan.FileItem = file;

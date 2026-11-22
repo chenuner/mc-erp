@@ -37,8 +37,10 @@ const month = ref(currentMonth)
 /** 上次選過的月份：薪酬表／打卡明細的月份必填（後端按年月查），從「全部年月」切回來時用它恢復。 */
 let lastMonth = month.value
 const workerFilter = ref('')
-/** 薪酬表專用：按當月職位快照篩選；打卡明細沒有職位欄，切到其他 tab 時不帶這個條件。 */
+/** 薪酬表專用：按當月職位快照篩選；打卡明細只顯示職位、不提供篩選，切到其他 tab 時不帶這個條件。 */
 const positionFilter = ref('')
+/** 薪酬表專用：按當月地盤快照篩選；打卡明細不提供地盤篩選，切到其他 tab 時不帶這個條件。 */
+const siteFilter = ref('')
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
@@ -109,10 +111,12 @@ async function fetchRows() {
         month.value = lastMonth
         return
       }
+      // 沒選的條件一律不帶：空字串會變成 ?siteDictId= 這種空值，後端 Guid? 綁定會 400
       const params = {
         ...selected,
         workerId: workerFilter.value || undefined,
         positionId: activeTab.value === 'payroll' ? positionFilter.value || undefined : undefined,
+        siteDictId: activeTab.value === 'payroll' ? siteFilter.value || undefined : undefined,
         page: page.value,
         pageSize: pageSize.value,
       }
@@ -150,10 +154,11 @@ function search() {
   else fetchRows()
 }
 
-/** 薪酬表／打卡明細的重置：清空姓名、職位，月份回到當前月（月份必填，不能清空）。 */
+/** 薪酬表／打卡明細的重置：清空姓名、職位、地盤，月份回到當前月（月份必填，不能清空）。 */
 function resetFilters() {
   workerFilter.value = ''
   positionFilter.value = ''
+  siteFilter.value = ''
   // 月份有變就由 watch 重查；沒變就自己在原地重查一次
   if (month.value !== currentMonth) month.value = currentMonth
   else search()
@@ -195,10 +200,14 @@ const payrollForm = reactive<PayrollFields>({
 const payrollRules: FormRules = Object.fromEntries(columns.map(column => [column.key, [
   { required: true, type: 'number', min: 0, message: `請輸入有效的${column.label}`, trigger: 'change' },
 ]]))
-const punchForm = reactive({ clockInTime: '', clockOutTime: '', overtimeHours: 0, isLaborLeave: false, remark: '' })
+const punchForm = reactive({
+  clockInTime: '', clockOutTime: '', overtimeHours: 0, isLaborLeave: false,
+  siteDictId: '', positionDictId: '', remark: '',
+})
 const punchRules: FormRules = {
   clockInTime: [{ required: true, message: '請選擇上班時間', trigger: 'change' }],
   overtimeHours: [{ required: true, type: 'number', min: 0, message: '請輸入有效的加班小時', trigger: 'change' }],
+  siteDictId: [{ required: true, message: '請選擇地盤', trigger: 'change' }],
   clockOutTime: [{
     validator: (_rule, value, callback) => {
       if (value && value <= punchForm.clockInTime) callback(new Error('下班時間須晚於上班時間'))
@@ -220,7 +229,8 @@ function editPunch(row: PunchDto) {
   editingName.value = row.name
   Object.assign(punchForm, {
     clockInTime: localTime(row.clockInTime), clockOutTime: localTime(row.clockOutTime),
-    overtimeHours: row.overtimeHours, isLaborLeave: row.isLaborLeave, remark: row.remark ?? '',
+    overtimeHours: row.overtimeHours, isLaborLeave: row.isLaborLeave,
+    siteDictId: row.siteDictId, positionDictId: row.positionDictId ?? '', remark: row.remark ?? '',
   })
   punchDialog.value = true
 }
@@ -241,12 +251,19 @@ async function savePunch() {
   if (!await punchFormRef.value?.validate().catch(() => false)) return
   saving.value = true
   try {
-    await updatePunch(editingId.value, {
-      ...punchForm, clockInTime: `${punchForm.clockInTime.replace(' ', 'T')}+08:00`,
+    const result = await updatePunch(editingId.value, {
+      clockInTime: `${punchForm.clockInTime.replace(' ', 'T')}+08:00`,
       clockOutTime: punchForm.clockOutTime ? `${punchForm.clockOutTime.replace(' ', 'T')}+08:00` : null,
+      overtimeHours: punchForm.overtimeHours,
+      isLaborLeave: punchForm.isLaborLeave,
+      siteDictId: punchForm.siteDictId,
+      positionDictId: punchForm.positionDictId || null,
+      remark: punchForm.remark,
     })
     punchDialog.value = false
-    ElMessage.success('打卡明細已保存')
+    ElMessage.success(result.payrollRows > 0
+      ? `打卡明細已保存，該月薪酬已按明細重算（${result.payrollRows} 行）`
+      : '打卡明細已保存')
     await fetchRows()
   } catch {
   } finally { saving.value = false }
@@ -460,12 +477,28 @@ async function reloadPositions() {
   }
 }
 
-/** 員工、地盤和職位分類清單只在第一次用到時載入；同步要選人、選地盤，篩選和員工表單要職位。 */
+/** 重新載入地盤分類；和職位一樣是選填（可清空），載入失敗就當沒有選項。 */
+async function reloadSites() {
+  try {
+    sites.value = await listAttendanceSites()
+    if (siteFilter.value && !sites.value.some(item => item.id === siteFilter.value)) {
+      siteFilter.value = ''
+      if (activeTab.value === 'payroll') void fetchRows()
+    }
+  } catch {
+    sites.value = []
+  }
+}
+
+/**
+ * 員工、地盤和職位分類清單只在第一次用到時載入；同步要選人、選地盤，篩選和員工表單要職位。
+ * 每次進入頁面都重新抓一次地盤和職位：字典改了名之後，篩選和下拉不能留著舊標籤。
+ */
 async function ensureOptions() {
   await Promise.all([
     workers.value.length ? Promise.resolve() : listWorkers().then(rows => { workers.value = rows }).catch(() => {}),
-    sites.value.length ? Promise.resolve() : listAttendanceSites().then(rows => { sites.value = rows }).catch(() => {}),
-    positions.value.length ? Promise.resolve() : reloadPositions(),
+    reloadSites(),
+    reloadPositions(),
   ])
 }
 
@@ -667,49 +700,30 @@ async function syncCard() {
   }
   if (!canSync.value) return
   const workerName = workers.value.find(worker => worker.id === syncWorkerId.value)?.name ?? '該員工'
-  // 卡上手寫姓名和選中的員工對不上（OCR 認錯字）：改名以員工為準，同步前先存回去
-  const relabel = cardName.value !== workerName ? workerName : null
   try {
     await ElMessageBox.confirm(
       `將為「${workerName}」寫入 ${draft.rows.length} 筆打卡明細，並重算 ${draft.year} 年 ${draft.month} 月薪酬。`
-      + `${relabel ? `卡上的姓名「${cardName.value || '未識別'}」會改成「${relabel}」。` : ''}`
       + '該員工該月上次由考勤卡導入的明細會被覆蓋（模擬或人工的明細不受影響）。',
       '同步到打卡明細及薪酬表', { confirmButtonText: '同步', cancelButtonText: '取消', type: 'warning' })
   } catch { return }
   syncing.value = true
   try {
-    // 先存改名（後端會清掉核對時間），再補回核對，然後才同步
-    if (relabel && !await relabelAndConfirm(detail.id)) return
     const result = await syncCardScan(detail.id, { workerId: syncWorkerId.value, siteDictId: syncSiteId.value })
-    ElMessage.success(`已寫入 ${result.addedRecords} 筆打卡明細；${result.year} 年 ${result.month} 月薪酬已重算：工數 ${numberFormatter.format(result.workDays)}、O.T. ${numberFormatter.format(result.overtimeHours)} 小時、實付 HK$${moneyFormatter.format(result.actualPay)}`)
+    const totals = result.rows.reduce(
+      (sum, row) => ({
+        workDays: sum.workDays + row.workDays,
+        overtimeHours: sum.overtimeHours + row.overtimeHours,
+        actualPay: sum.actualPay + row.actualPay,
+      }),
+      { workDays: 0, overtimeHours: 0, actualPay: 0 },
+    )
+    ElMessage.success(`已寫入 ${result.addedRecords} 筆打卡明細；${result.year} 年 ${result.month} 月薪酬已重算（${result.rows.length} 行）：工數 ${numberFormatter.format(totals.workDays)}、O.T. ${numberFormatter.format(totals.overtimeHours)} 小時、實付 HK$${moneyFormatter.format(totals.actualPay)}`)
     cardDialog.value = false
     // 切到薪酬表才看得到重算結果；篩選也跟著卡上的年月走
     activeTab.value = 'payroll'
     if (!locateMonth(result.year, result.month)) await fetchRows()
   } catch { /* 已由攔截器提示 */ }
   finally { syncing.value = false }
-}
-
-/**
- * 把卡上的姓名改成選中的員工姓名並重新標記為已核對；成功回 true，失敗（已由攔截器提示）回 false。
- * 改名後後端清掉了核對時間，不重新標記就過不了同步的前置檢查。
- */
-async function relabelAndConfirm(id: string): Promise<boolean> {
-  const draft = cardDraft.value
-  const name = workers.value.find(worker => worker.id === syncWorkerId.value)?.name
-  if (!draft || !name) return false
-  try {
-    await updateCardScan(id, {
-      year: draft.year,
-      month: draft.month,
-      name,
-      records: draft.rows.map(row => ({ day: row.day, ...row.values })),
-    })
-    // 改名後後端清掉了核對時間，這裡補回核對，同步的前提才滿足
-    loadCard(await confirmCardScan(id))
-    syncWorkerHint.value = `已把卡上的姓名改成「${name}」。`
-    return true
-  } catch { return false }
 }
 
 function pickCard(event: Event) {
@@ -891,6 +905,13 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
             :label="position.enabled ? position.label : `${position.label}（停用）`" :value="position.id" />
         </el-select>
       </div>
+      <div v-if="activeTab === 'payroll'" class="filter-field">
+        <label for="attendance-site">地盤</label>
+        <el-select id="attendance-site" v-model="siteFilter" filterable clearable placeholder="全部地盤" @change="search">
+          <el-option v-for="site in sites" :key="site.id"
+            :label="site.enabled ? site.label : `${site.label}（停用）`" :value="site.id" />
+        </el-select>
+      </div>
       <el-button type="primary" native-type="submit"><AppIcon name="search" :size="16" class="button-icon" />查詢</el-button>
       <el-button v-if="activeTab !== 'cards'" :disabled="loading" @click="resetFilters">重置</el-button>
       <el-tooltip content="刷新" placement="top">
@@ -900,14 +921,21 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
 
     <div class="table-region">
       <el-table v-if="activeTab === 'payroll'" v-loading="loading" :data="payroll" stripe row-key="id" max-height="600"
-        :show-summary="payroll.length > 0" :summary-method="payrollSummary">
+        class="mc-table-summary" :show-summary="payroll.length > 0" :summary-method="payrollSummary">
         <el-table-column prop="name" label="姓名" width="110" fixed show-overflow-tooltip />
         <el-table-column label="職位分類" width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ row.position || '—' }}</template>
         </el-table-column>
-        <el-table-column v-for="column in columns" :key="column.key" :prop="column.key" :label="column.label" :width="column.width" align="right">
+        <el-table-column label="地盤" width="140" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.site || '—' }}</template>
+        </el-table-column>
+        <el-table-column v-for="column in columns" :key="column.key" :prop="column.key" :label="column.label"
+          :width="column.key === 'totalAmount' ? undefined : column.width"
+          :min-width="column.key === 'totalAmount' ? 125 : undefined" align="right">
           <template #default="{ row }">
-            <span class="num">{{ (column.money ? moneyFormatter : numberFormatter).format(row[column.key]) }}</span>
+            <span class="num" :class="{ 'col-highlight': column.key === 'totalAmount' }">
+              {{ (column.money ? moneyFormatter : numberFormatter).format(row[column.key]) }}
+            </span>
           </template>
         </el-table-column>
         <el-table-column prop="remark" label="注意！" min-width="230" show-overflow-tooltip>
@@ -926,6 +954,9 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
       <el-table v-else-if="activeTab === 'punches'" v-loading="loading" :data="punches" stripe row-key="id" max-height="600">
         <el-table-column prop="name" label="姓名" width="110" fixed show-overflow-tooltip />
         <el-table-column prop="employeeId" label="工號" width="125" />
+        <el-table-column label="職位分類" width="120" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.positionName || '—' }}</template>
+        </el-table-column>
         <el-table-column prop="siteName" label="地盤" min-width="140" show-overflow-tooltip />
         <el-table-column label="上班打卡（香港時間）" width="205">
           <template #default="{ row }"><span class="num">{{ localTime(row.clockInTime) }}</span></template>
@@ -1216,6 +1247,19 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
         <el-form-item label="下班打卡（香港時間）" prop="clockOutTime">
           <el-date-picker v-model="punchForm.clockOutTime" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" format="YYYY-MM-DD HH:mm:ss" :disabled="saving" />
         </el-form-item>
+        <el-form-item label="地盤" prop="siteDictId">
+          <el-select v-model="punchForm.siteDictId" filterable :disabled="saving" placeholder="選擇地盤"
+            no-data-text="尚未配置地盤，請先到「系統字典 → 地盤分類」新增">
+            <el-option v-for="site in sites" :key="site.id"
+              :label="site.enabled ? site.label : `${site.label}（停用）`" :value="site.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="職位分類（可選）" prop="positionDictId">
+          <el-select v-model="punchForm.positionDictId" filterable clearable :disabled="saving" placeholder="不指定職位">
+            <el-option v-for="position in positions" :key="position.id"
+              :label="position.enabled ? position.label : `${position.label}（停用）`" :value="position.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="O.T.(小時)" prop="overtimeHours"><el-input-number v-model="punchForm.overtimeHours" :precision="2" :min="0" :max="999999.99" :step="0.5" :disabled="saving" /></el-form-item>
         <el-form-item label="勞工假" prop="isLaborLeave"><el-switch v-model="punchForm.isLaborLeave" :disabled="saving" /></el-form-item>
         <el-form-item label="注意！" prop="remark"><el-input v-model="punchForm.remark" type="textarea" :rows="3" maxlength="255" show-word-limit :disabled="saving" /></el-form-item>
@@ -1267,9 +1311,10 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
 .filter-hint { font-size: 12px; line-height: 1.5; color: var(--el-text-color-secondary); }
 .filter-field :deep(.el-date-editor) { width: 100%; }
 .filter-field :deep(.el-select) { width: 100%; }
+/* 合計行樣式在 styles/index.css 的 .mc-table-summary（和會計收據共用） */
 .table-region { min-width: 0; background: var(--mc-card-bg, var(--el-bg-color)); border-top: 1px solid var(--el-border-color); }
-.table-region :deep(.el-table__footer-wrapper td) { background: var(--el-fill-color-light); }
-.table-region :deep(.el-table__footer-wrapper .cell) { font-weight: 500; font-variant-numeric: tabular-nums; }
+/* 明細的「總數」欄：這是主管最常看的一欄，加粗標出來 */
+.col-highlight { font-weight: 700; }
 .num { font-variant-numeric: tabular-nums; }
 .pagination { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 16px 0; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; }

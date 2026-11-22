@@ -29,19 +29,5 @@ public sealed class AttendanceRepository(ErpDbContext db) : IAttendanceRepositor
     // --- Site ---
     // 地盤是系統字典項（AccountingSiteCategory），查詢和維護都走 SysDict
 
-    // --- AttendanceRecord ---
-    public async Task<List<AttendanceRecord>> GetRecordsAsync(Guid workerId, DateTime start, DateTime end, CancellationToken ct = default)
-    {
-        return await db.AttendanceRecords
-            .Where(r => r.WorkerId == workerId && r.ClockInTime >= start && r.ClockInTime < end)
-            .OrderBy(r => r.ClockInTime)
-            .ToListAsync(ct);
-    }
-
-    // --- MonthlyWorkSummary ---
-    public Task<MonthlyWorkSummary?> GetSummaryAsync(Guid workerId, int year, int month, CancellationToken ct = default)
-        => db.MonthlyWorkSummaries.FirstOrDefaultAsync(s => s.WorkerId == workerId && s.Year == year && s.Month == month, ct);
-
-    public Task<List<MonthlyWorkSummary>> GetSummariesByMonthAsync(int year, int month, CancellationToken ct = default)
-        => db.MonthlyWorkSummaries.Where(s => s.Year == year && s.Month == month).ToListAsync(ct);
+    // 打卡明細與薪酬表的查詢在 AttendanceTableService，直接用 DbContext（列表、筆數、合計共用同一份篩選）
 }

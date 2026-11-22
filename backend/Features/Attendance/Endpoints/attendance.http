@@ -1,0 +1,144 @@
+@baseUrl = http://localhost:5209
+@token = REPLACE_WITH_LOCAL_ADMIN_TOKEN
+@scanId = REPLACE_WITH_SCAN_ID
+@workerId = REPLACE_WITH_WORKER_ID
+@siteDictId = REPLACE_WITH_SITE_DICT_ID
+@positionId = REPLACE_WITH_POSITION_DICT_ID
+@punchId = REPLACE_WITH_PUNCH_ID
+@payrollId = REPLACE_WITH_PAYROLL_ID
+@year = 2026
+@month = 11
+
+### 職位分類選項（系統字典 AttendancePosition，由 SeedData 預置「樓面員工」，其餘在系統字典維護）
+GET {{baseUrl}}/api/system/dicts/group/AttendancePosition
+Authorization: Bearer {{token}}
+
+### 員工清單（同步時選人用；positionId / position 可為空）
+GET {{baseUrl}}/api/attendance/workers
+Authorization: Bearer {{token}}
+
+### 新增員工（姓名必填，日薪是計薪基礎；職位分類可選，可省略 positionId）
+POST {{baseUrl}}/api/attendance/workers
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "陳大文",
+  "employeeId": "MOCK-001",
+  "dailyWage": 900,
+  "positionId": "{{positionId}}"
+}
+
+### 修改員工（只送要改的欄位；isActive=false 即停用；positionId 傳空 Guid 代表清空職位）
+PUT {{baseUrl}}/api/attendance/workers/{{workerId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "陳大文",
+  "employeeId": "MOCK-001",
+  "dailyWage": 950,
+  "isActive": true,
+  "positionId": "{{positionId}}"
+}
+
+### 地盤選項（系統字典 AccountingSiteCategory「地盤分類」，考勤和會計票據共用；同步時選的就是這裡的字典項 id）
+GET {{baseUrl}}/api/system/dicts/group/AccountingSiteCategory
+Authorization: Bearer {{token}}
+
+### 上傳考勤卡圖片：識別、落庫一次完成（JPEG / PNG，最多 4 MB）
+POST {{baseUrl}}/api/attendance/scan
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=AttendanceCard
+
+--AttendanceCard
+Content-Disposition: form-data; name="file"; filename="card.jpg"
+Content-Type: image/jpeg
+
+< ./card.jpg
+--AttendanceCard--
+
+### 人工修正識別結果（只覆寫改動的欄位；時間 HH:mm，留空即清除）
+PUT {{baseUrl}}/api/attendance/scans/{{scanId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "year": 2026,
+  "month": 11,
+  "name": "朱駿豪",
+  "records": [
+    { "day": 5, "amIn": "09:07", "amOut": "17:05", "pmIn": "", "pmOut": "", "otIn": "", "otOut": "" }
+  ]
+}
+
+### 標記為已核對（同步的前提）：清掉卡片層複核標記、記下核對時間，時間欄不改
+### includeHandwritten=true 時連手寫年月姓名一併判定；改動識別結果會清空核對時間，要重新標記
+POST {{baseUrl}}/api/attendance/scans/{{scanId}}/confirm
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "includeHandwritten": false
+}
+
+### 同步到打卡明細及薪酬表：每天一筆打卡明細，再按該員工該月全部明細重算薪酬
+### 必須先「標記為已核對」且沒有需覆核的欄位，否則回 400（先核對，再同步）
+### 明細會寫入員工當下的職位分類和這裡選的地盤；薪酬按「員工 × 職位 × 地盤」分組，回傳的 rows 可能多行
+### 同一員工同一月再同步＝重算，會覆蓋上次導入的明細；員工日薪為 0 會回 400
+POST {{baseUrl}}/api/attendance/scans/{{scanId}}/sync
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "workerId": "{{workerId}}",
+  "siteDictId": "{{siteDictId}}"
+}
+
+### 重算後的打卡明細與薪酬表（workerId 可省略，省略即全部）
+GET {{baseUrl}}/api/attendance/punches?year={{year}}&month={{month}}&workerId={{workerId}}&page=1&pageSize=20
+Authorization: Bearer {{token}}
+
+### 薪酬表：同一員工同一月可能有多行，每一行是一個「職位 × 地盤」組合
+GET {{baseUrl}}/api/attendance/payroll?year={{year}}&month={{month}}&workerId={{workerId}}&positionId={{positionId}}&page=1&pageSize=20
+Authorization: Bearer {{token}}
+
+### 人工修正打卡明細：職位和地盤決定它在薪酬表歸到哪一行
+### 只有參與計薪的欄位（時間 / O.T. / 勞工假 / 職位 / 地盤）變動才重算薪酬；只改備註不重算
+### 回傳 { punch, payrollRows }，payrollRows = 0 表示沒有涉及計薪的改動；改到別的月份時兩個月都重算
+PUT {{baseUrl}}/api/attendance/punches/{{punchId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "clockInTime": "2026-11-05T09:07:00+08:00",
+  "clockOutTime": "2026-11-05T17:05:00+08:00",
+  "overtimeHours": 0,
+  "isLaborLeave": false,
+  "siteDictId": "{{siteDictId}}",
+  "positionDictId": "{{positionId}}",
+  "remark": ""
+}
+
+### 人工修正薪酬表某一行（不觸發自動計算；下次同步或改明細時會被蓋回去）
+PUT {{baseUrl}}/api/attendance/payroll/{{payrollId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "workDays": 22,
+  "laborLeaveDays": 1,
+  "totalWorkDays": 23,
+  "overtimeHours": 6.5,
+  "dailyWage": 900,
+  "overtimeAmount": 1096.88,
+  "mpfEmployer": 1150,
+  "mpfEmployee": 1150,
+  "actualPay": 20646.88,
+  "totalAmount": 22946.88,
+  "remark": "備註保留"
+}
+
+### 刪除員工（軟刪除；停用請改用 PUT workers/{id} 帶 isActive=false）
+DELETE {{baseUrl}}/api/attendance/workers/{{workerId}}
+Authorization: Bearer {{token}}
