@@ -126,9 +126,9 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
         var documentType = await DictAsync(request.DocumentTypeDictId, "AccountingDocumentType");
         CheckModel(documentType.Value);
         var type = await DictAsync(request.Type, "Accounting");
-        if (request.SiteCategoryDictId is { } siteCategory) await DictAsync(siteCategory, "AccountingSiteCategory");
         // 必填規則與前端一致：票據類型、支出分類、地盤分類；日期、金額、幣種可稍後補
         if (request.SiteCategoryDictId is null) throw new InvalidOperationException("請選擇地盤分類");
+        var siteCategory = await DictAsync(request.SiteCategoryDictId.Value, "AccountingSiteCategory");
         if (type.Value == "pending") throw new InvalidOperationException("請選擇實際支出分類，不能是「待分類」");
         if (request.Amount is <= 0) throw new InvalidOperationException("金額必須大於 0");
         if (request.Amount is > 9999999999999999.99m) throw new InvalidOperationException("金額過大");
@@ -142,8 +142,8 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
         receipt.DocumentTypeDict = documentType;
         receipt.Type = type.Id;
         receipt.TypeDict = type;
-        receipt.SiteCategoryDictId = request.SiteCategoryDictId;
-        receipt.SiteCategoryDict = request.SiteCategoryDictId is { } categoryId ? await DictAsync(categoryId, "AccountingSiteCategory") : null;
+        receipt.SiteCategoryDictId = siteCategory.Id;
+        receipt.SiteCategoryDict = siteCategory;
         receipt.ReceiptDate = request.ReceiptDate;
         receipt.Amount = request.Amount;
         receipt.CurrencyCode = string.IsNullOrEmpty(currency) ? null : currency;

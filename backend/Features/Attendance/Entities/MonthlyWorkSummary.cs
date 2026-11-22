@@ -22,6 +22,14 @@ public sealed class MonthlyWorkSummary : Entity
     /// <summary>薪酬計算當下的職位分類標籤快照；保留歷史名稱，字典改名或停用也不影響已生成的月份。</summary>
     public string? Position { get; set; }
 
+    /// <summary>
+    /// 這一行的地盤（AccountingSiteCategory 字典項）。薪酬按「員工 × 職位 × 地盤」分組，
+    /// 同一個員工同一個月可能在多個地盤、多個職位下工作，各出一行。
+    /// </summary>
+    public Guid? SiteDictId { get; set; }
+    /// <summary>地盤標籤快照；與 <see cref="Position"/> 同理，保留歷史名稱。</summary>
+    public string? Site { get; set; }
+
     /// <summary>工數，支持小數。</summary>
     public decimal WorkDays { get; set; }
     /// <summary>勞工假天數，支持小數。</summary>

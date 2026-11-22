@@ -269,6 +269,7 @@ Check(badTime, "A time that is not HH:mm is rejected instead of silently dropped
 // --- 考勤卡 → 打卡明細 ---
 var workerId = Guid.NewGuid();
 var siteDictId = Guid.NewGuid();
+var floorPositionId = Guid.NewGuid();
 var worked = new AttendanceCardPunch
 {
     Day = 5, AmIn = new TimeOnly(9, 7), AmOut = new TimeOnly(12, 0),
@@ -278,7 +279,7 @@ var worked = new AttendanceCardPunch
 Check(AttendanceRules.HasTime(worked), "A day with any punched time counts as worked");
 Check(!AttendanceRules.HasTime(new AttendanceCardPunch { Day = 5 }), "A rest day with no time at all is not a work day");
 
-var cardRecord = AttendanceRules.ToRecord(2026, 10, worked, workerId, siteDictId);
+var cardRecord = AttendanceRules.ToRecord(2026, 10, worked, workerId, siteDictId, null);
 Check(cardRecord.ClockInTime == new DateTime(2026, 10, 5, 1, 7, 0, DateTimeKind.Utc),
     "09:07 on the card (Hong Kong) is stored as 01:07 UTC");
 Check(cardRecord.ClockOutTime == new DateTime(2026, 10, 5, 9, 5, 0, DateTimeKind.Utc),
@@ -287,9 +288,12 @@ Check(cardRecord.OvertimeHours == 2.5m, "Overtime is the gap between the overtim
 Check(cardRecord is { IsLaborLeave: false, Remark: AttendanceRules.ImportedRemark },
     "Imported rows are marked as card imports and are never labour leave");
 Check(cardRecord.WorkerId == workerId && cardRecord.SiteDictId == siteDictId, "Imported rows are linked to the chosen worker and site");
+Check(cardRecord.PositionDictId == null && !cardRecord.IsLaborLeave, "Position is carried from the worker; imported rows are never labour leave");
+var withPosition = AttendanceRules.ToRecord(2026, 10, worked, workerId, siteDictId, floorPositionId);
+Check(withPosition.PositionDictId == floorPositionId, "The worker's position is written onto the punch for payroll grouping");
 
 var midnightRecord = AttendanceRules.ToRecord(2026, 10,
-    new AttendanceCardPunch { Day = 31, AmIn = new TimeOnly(22, 0), AmOut = new TimeOnly(1, 30) }, workerId, siteDictId);
+    new AttendanceCardPunch { Day = 31, AmIn = new TimeOnly(22, 0), AmOut = new TimeOnly(1, 30) }, workerId, siteDictId, null);
 Check(midnightRecord.ClockOutTime == midnightRecord.ClockInTime.AddHours(3).AddMinutes(30),
     "An out time earlier than the in time is treated as after midnight");
 Check(AttendanceRules.OvertimeHoursOf(new AttendanceCardPunch { OtIn = new TimeOnly(22, 0), OtOut = new TimeOnly(1, 0) }) == 3m,

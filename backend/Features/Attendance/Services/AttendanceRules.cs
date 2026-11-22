@@ -31,8 +31,10 @@ public static class AttendanceRules
     /// 一列明細換成一筆打卡記錄：上班取上午上班（缺就用下午上班），下班取下午下班（缺就用上午下班）。
     /// 卡上是香港時間，存庫一律換成 UTC；下班早於上班代表跨過午夜，往後推一天。
     /// 加班時數另計到 <see cref="AttendanceRecord.OvertimeHours"/>，不影響上下班時間。
+    /// 職位和地盤一起寫進明細，薪酬表再按這兩個欄位分組出多行。
     /// </summary>
-    public static AttendanceRecord ToRecord(int year, int month, AttendanceCardPunch punch, Guid workerId, Guid siteDictId)
+    public static AttendanceRecord ToRecord(int year, int month, AttendanceCardPunch punch, Guid workerId,
+        Guid siteDictId, Guid? positionDictId)
     {
         var start = punch.AmIn ?? punch.PmIn ?? punch.OtIn
             ?? throw new InvalidOperationException($"第 {punch.Day} 日沒有任何打卡時間");
@@ -47,6 +49,7 @@ public static class AttendanceRules
         {
             WorkerId = workerId,
             SiteDictId = siteDictId,
+            PositionDictId = positionDictId,
             ClockInTime = clockIn,
             ClockOutTime = clockOut,
             OvertimeHours = OvertimeHoursOf(punch),
@@ -69,9 +72,9 @@ public static class AttendanceRules
     }
 
     /// <summary>
-    /// 工數：目前「一天一筆打卡明細 = 1 工」。要改成半天 0.5 工或按工時折算時，只改這個方法。
+    /// 工數：目前「一天一筆打卡明細 = 1 工」，回傳 decimal 以便日後直接改成半天 0.5 工或按工時折算。
     /// </summary>
-    public static int WorkDaysOf(IEnumerable<AttendanceRecord> records) =>
+    public static decimal WorkDaysOf(IEnumerable<AttendanceRecord> records) =>
         records.Count(record => !record.IsLaborLeave);
 
     /// <summary>OT 時薪＝日薪 ÷ 8 × 1.5（日薪 900 → 168.75）。</summary>
@@ -86,7 +89,7 @@ public static class AttendanceRules
     /// 實付人工 = 日薪 × 總工數 − MPF（僱員）+ OT 金額；
     /// 總數 = MPF（僱主）+ MPF（僱員）+ 實付人工。
     /// </summary>
-    public static void ApplyPayroll(MonthlyWorkSummary summary, decimal dailyWage, int workDays, decimal overtimeHours)
+    public static void ApplyPayroll(MonthlyWorkSummary summary, decimal dailyWage, decimal workDays, decimal overtimeHours)
     {
         summary.DailyWage = Money(dailyWage);
         summary.WorkDays = workDays;
@@ -104,6 +107,13 @@ public static class AttendanceRules
     {
         var first = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Utc);
         return (first - HongKongOffset, first.AddMonths(1) - HongKongOffset);
+    }
+
+    /// <summary>一筆打卡時間（UTC）屬於哪個香港年月；薪酬表和考勤卡按月歸屬都靠它。</summary>
+    public static (int Year, int Month) HongKongMonth(DateTime utc)
+    {
+        var local = utc + HongKongOffset;
+        return (local.Year, local.Month);
     }
 
     /// <summary>把卡上的香港時間（年月日 + 時分）換成 UTC。</summary>

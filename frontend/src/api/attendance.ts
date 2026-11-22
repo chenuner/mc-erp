@@ -65,6 +65,9 @@ export interface PayrollDto extends PayrollFields {
   /** 當月薪酬生成時的職位分類快照；之後改員工職位不會影響已生成的月份。 */
   positionId: string | null
   position: string | null
+  /** 當月薪酬生成時的地盤快照；薪酬按「員工 × 職位 × 地盤」分組，所以同一人同一月可能有多行。 */
+  siteDictId: string | null
+  site: string | null
   year: number
   month: number
 }
@@ -74,6 +77,10 @@ export interface PunchFields {
   clockOutTime: string | null
   overtimeHours: number
   isLaborLeave: boolean
+  /** 地盤決定這筆明細在薪酬表歸到哪一行（必填）。 */
+  siteDictId: string
+  /** 職位分類可為空；和地盤一起決定薪酬表的分組行。 */
+  positionDictId: string | null
   remark: string | null
 }
 
@@ -83,6 +90,7 @@ export interface PunchDto extends PunchFields {
   name: string
   employeeId: string | null
   siteName: string
+  positionName: string | null
 }
 
 export interface AttendanceQuery {
@@ -92,6 +100,8 @@ export interface AttendanceQuery {
   workerId?: string
   /** 只看薪酬表當月職位快照符合的員工；不填就是全部。 */
   positionId?: string
+  /** 只看薪酬表當月地盤快照符合的行（一個人在兩個地盤做過就是兩行）；不填就是全部。 */
+  siteDictId?: string
   page: number
   pageSize: number
 }
@@ -127,8 +137,14 @@ export async function updatePayroll(id: string, payload: PayrollFields): Promise
   return (await request.put(`/attendance/payroll/${id}`, payload)) as PayrollDto
 }
 
-export async function updatePunch(id: string, payload: PunchFields): Promise<PunchDto> {
-  return (await request.put(`/attendance/punches/${id}`, payload)) as PunchDto
+/** 改打卡明細的結果：payrollRows 是這次重算出來的薪酬行數，0 表示沒有涉及計薪的改動。 */
+export interface PunchUpdateResult {
+  punch: PunchDto
+  payrollRows: number
+}
+
+export async function updatePunch(id: string, payload: PunchFields): Promise<PunchUpdateResult> {
+  return (await request.put(`/attendance/punches/${id}`, payload)) as PunchUpdateResult
 }
 
 /** 考勤卡單日打卡；時間是 HH:mm，空白代表當日沒有該次打卡。 */
@@ -235,17 +251,13 @@ export async function deleteCardScan(id: string): Promise<void> {
   await request.delete(`/attendance/scans/${id}`)
 }
 
-/** 同步結果：寫入幾筆打卡明細，以及重算後的薪酬表內容。 */
-export interface CardSyncResult {
-  scanId: string
-  year: number
-  month: number
-  workerId: string
-  workerName: string
-  /** 地盤是系統字典 AccountingSiteCategory 的字典項 id。 */
-  siteDictId: string
-  siteName: string
-  addedRecords: number
+/** 同步後該員工該月薪酬表的一行（按職位 × 地盤分組）；員工資訊在結果頂層。 */
+export interface CardPayrollRow {
+  id: string
+  positionDictId: string | null
+  position: string | null
+  siteDictId: string | null
+  site: string | null
   workDays: number
   laborLeaveDays: number
   totalWorkDays: number
@@ -256,6 +268,20 @@ export interface CardSyncResult {
   mpfEmployee: number
   actualPay: number
   totalAmount: number
+}
+
+/** 同步結果：寫入幾筆打卡明細，以及重算後該員工該月薪酬表的行（按職位 × 地盤分組，可能多行）。 */
+export interface CardSyncResult {
+  scanId: string
+  year: number
+  month: number
+  workerId: string
+  workerName: string
+  /** 地盤是系統字典 AccountingSiteCategory 的字典項 id。 */
+  siteDictId: string
+  siteName: string
+  addedRecords: number
+  rows: CardPayrollRow[]
 }
 
 /** 把識別結果導入打卡明細（員工、地盤由使用者選），並重算該員工該月的薪酬表；前提是已標記為已核對。 */

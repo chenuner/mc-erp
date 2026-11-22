@@ -131,6 +131,11 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
                 .WithMany()
                 .HasForeignKey(r => r.SiteDictId)
                 .OnDelete(DeleteBehavior.Restrict);
+            // 職位分類同理（AttendancePosition 字典）
+            e.HasOne(r => r.Position)
+                .WithMany()
+                .HasForeignKey(r => r.PositionDictId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<MonthlyWorkSummary>(e =>
@@ -147,8 +152,12 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
             e.Property(s => s.ActualPay).HasPrecision(18, 2);
             e.Property(s => s.TotalAmount).HasPrecision(18, 2);
             e.Property(s => s.Position).HasMaxLength(100);
+            e.Property(s => s.Site).HasMaxLength(100);
             e.Property(s => s.Remark).HasMaxLength(255);
-            e.HasIndex(s => new { s.WorkerId, s.Year, s.Month }).IsUnique();
+            // 一行 = 一個員工一個月的一個「職位 × 地盤」組合；唯一性由程式保證
+            // （職位可為空，PostgreSQL 的唯一索引對 NULL 各行視為不同，靠索引擋不住重複）
+            e.HasIndex(s => new { s.WorkerId, s.Year, s.Month, s.PositionDictId, s.SiteDictId })
+                .HasDatabaseName("idx_attendance_summary_worker_month_group");
         });
 
         // 考勤卡掃描：欄位對應識別結果，工時不落庫；原圖走 storage_files，一筆掃描對應一張原圖

@@ -28,12 +28,15 @@ public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentU
         if (dict.GroupName == "Accounting" && !user.IsInRole("Admin")) throw new UnauthorizedAccessException();
 
         var saved = await storage.SaveAsync(content, originalName, ct);
+        // 按 MD5 去重：同內容在磁盤上只留一份，剛寫的這份若重複就丟掉，改用既有的 StoredName。
+        // 元數據（原名、類別、上傳人、時間）仍然各自一行，所以同一張圖可以一次當收據、一次當考勤卡。
+        var storedName = await DeduplicateAsync(saved.StoredName, saved.Md5, ct);
         var file = new FileItem
         {
             Type = dict.Id,
             TypeDict = dict,
             OriginalName = originalName,
-            StoredName = saved.StoredName,
+            StoredName = storedName,
             Md5 = saved.Md5,
             ContentType = contentType,
             SizeBytes = sizeBytes,
@@ -44,6 +47,23 @@ public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentU
         db.FileItems.Add(file);
         await db.SaveChangesAsync(ct);
         return file;
+    }
+
+    /// <summary>
+    /// 回傳應該使用的 StoredName：已經有同 MD5 且未刪除的記錄就沿用它，並把剛寫的物理文件刪掉。
+    /// 只跟有 MD5 的記錄比對（歷史資料 Md5 為空，認不出內容）。
+    /// 併發上傳同一份新內容時可能兩邊都查不到、各寫一份，不會出錯，這個系統的併發量不值得加鎖。
+    /// </summary>
+    private async Task<string> DeduplicateAsync(string storedName, string md5, CancellationToken ct)
+    {
+        var existing = await db.FileItems.AsNoTracking()
+            .Where(item => item.Md5 == md5)
+            .OrderBy(item => item.CreatedAt).ThenBy(item => item.Id)
+            .Select(item => item.StoredName)
+            .FirstOrDefaultAsync(ct);
+        if (existing is null) return storedName;
+        await storage.DeleteAsync(storedName, ct);
+        return existing;
     }
 
     public async Task<List<FileItem>> 列表Async(Guid? type, CancellationToken ct)
@@ -65,6 +85,10 @@ public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentU
         return file is null ? null : (storage.OpenRead(file.StoredName), file);
     }
 
+    /// <summary>
+    /// 按內容（MD5）取文件。上傳已按 MD5 去重，同一個摘要的物理文件唯一，所以回哪一筆的字節都一樣；
+    /// 元數據取最早上傳的一筆，讓結果穩定可重現。
+    /// </summary>
     public async Task<(Stream Content, FileItem File)?> 按Md5下载Async(string md5, CancellationToken ct = default)
     {
         ct = context.HttpContext?.RequestAborted ?? ct;
@@ -78,7 +102,7 @@ public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentU
             query = query.Where(f => f.TypeDict == null || f.TypeDict.GroupName != "Accounting");
         }
 
-        var file = await query.FirstOrDefaultAsync(ct);
+        var file = await query.OrderBy(f => f.CreatedAt).ThenBy(f => f.Id).FirstOrDefaultAsync(ct);
         return file is null ? null : (storage.OpenRead(file.StoredName), file);
     }
 
@@ -132,8 +156,10 @@ public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentU
         file.DeletedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
 
-        // 元數據軟刪除後，物理文件同步清理
-        await storage.DeleteAsync(file.StoredName, ct);
+        // 按 MD5 去重後，同一個物理文件可能被多筆記錄共用：還有未刪除的記錄在用就先留著，
+        // 最後一筆記錄刪掉時才真正刪磁盤文件（file 已軟刪除，查詢過濾會排除它）
+        var stillUsed = await db.FileItems.AsNoTracking().AnyAsync(other => other.StoredName == file.StoredName, ct);
+        if (!stillUsed) await storage.DeleteAsync(file.StoredName, ct);
         return true;
     }
 }

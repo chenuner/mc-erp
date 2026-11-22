@@ -39,10 +39,15 @@ export async function deleteFile(id: string): Promise<void> {
   await request.delete(`/storage/files/${id}`)
 }
 
-/** 獲取文件二進制流（用於圖片預覽） */
-export async function getFileBlob(id: string, md5: string | null): Promise<Blob> {
-  const path = md5
-    ? `/storage/files/by-md5/${encodeURIComponent(md5)}/download`
-    : `/storage/files/${id}/download`
-  return (await request.get(path, { responseType: 'blob' })) as unknown as Blob
+/**
+ * 獲取文件二進制流（用於圖片預覽）。一律按 id 取圖：檔名和 ContentType 一定屬於這筆記錄。
+ * 去重與快取由呼叫端按 MD5 做——同內容只下載、只快取一份。
+ */
+export async function getFileBlob(id: string): Promise<Blob> {
+  return (await request.get(`/storage/files/${id}/download`, { responseType: 'blob' })) as unknown as Blob
+}
+
+/** 按內容（MD5）取文件；上傳已按 MD5 去重，同一個摘要的物理文件唯一。 */
+export async function getFileBlobByMd5(md5: string): Promise<Blob> {
+  return (await request.get(`/storage/files/by-md5/${encodeURIComponent(md5)}/download`, { responseType: 'blob' })) as unknown as Blob
 }

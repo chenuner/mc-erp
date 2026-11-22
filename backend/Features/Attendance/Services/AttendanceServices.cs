@@ -80,13 +80,4 @@ public sealed class AttendanceServices(IAttendanceRepository repo, SysDictServic
         worker.DeletedAt = DateTime.UtcNow;
         await repo.UpdateWorkerAsync(worker, ct);
     }
-
-    public async Task<List<AttendanceRecord>> GetRecordsAsync(Guid workerId, DateTime start, DateTime end, CancellationToken ct = default)
-        => await repo.GetRecordsAsync(workerId, start, end, ct);
-
-    public Task<List<MonthlyWorkSummary>> GetSummariesAsync(int year, int month, CancellationToken ct = default)
-        => repo.GetSummariesByMonthAsync(year, month, ct);
-
-    public Task<MonthlyWorkSummary?> GetSummaryAsync(Guid workerId, int year, int month, CancellationToken ct = default)
-        => repo.GetSummaryAsync(workerId, year, month, ct);
 }

@@ -18,6 +18,7 @@ public static class StorageEndpoints
             .DisableAntiforgery()
             .RequireAuthorization();
         group.MapGet("/files/{id:guid}/download", DownloadFileAsync).RequireAuthorization();
+        // 內容尋址：同 MD5 的物理文件唯一（上傳已去重），前端用它做快取
         group.MapGet("/files/by-md5/{md5}/download", DownloadFileByMd5Async).RequireAuthorization();
         group.MapDelete("/files/{id:guid}", DeleteFileAsync).RequireAuthorization();
     }
