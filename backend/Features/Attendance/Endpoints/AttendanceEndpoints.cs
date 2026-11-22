@@ -58,14 +58,14 @@ public static class AttendanceEndpoints
     private static async Task<Created<WorkerDto>> CreateWorkerAsync(
         CreateWorkerRequest req, AttendanceServices svc, CancellationToken ct)
     {
-        var worker = await svc.CreateWorkerAsync(req.Name, req.EmployeeId, req.DailyWage, ct);
+        var worker = await svc.CreateWorkerAsync(req.Name, req.EmployeeId, req.DailyWage, req.PositionId, ct);
         return TypedResults.Created($"/api/attendance/workers/{worker.Id}", WorkerDto.From(worker));
     }
 
     private static async Task<Results<Ok<WorkerDto>, NotFound>> UpdateWorkerAsync(
         Guid id, UpdateWorkerRequest req, AttendanceServices svc, CancellationToken ct)
     {
-        var worker = await svc.UpdateWorkerAsync(id, req.Name, req.EmployeeId, req.DailyWage, req.IsActive, ct);
+        var worker = await svc.UpdateWorkerAsync(id, req.Name, req.EmployeeId, req.DailyWage, req.IsActive, req.PositionId, ct);
         return worker is null ? TypedResults.NotFound() : TypedResults.Ok(WorkerDto.From(worker));
     }
 
@@ -170,9 +170,11 @@ public static class AttendanceEndpoints
 }
 
 // DTOs
-public sealed record WorkerDto(Guid Id, string Name, string? EmployeeId, decimal DailyWage, bool IsActive)
+public sealed record WorkerDto(Guid Id, string Name, string? EmployeeId, decimal DailyWage, bool IsActive,
+    Guid? PositionId, string? Position)
 {
-    public static WorkerDto From(Worker w) => new(w.Id, w.Name, w.EmployeeId, w.DailyWage, w.IsActive);
+    public static WorkerDto From(Worker w) => new(w.Id, w.Name, w.EmployeeId, w.DailyWage, w.IsActive,
+        w.PositionDictId, w.Position?.Label);
 }
 public sealed record SiteDto(Guid Id, string Name, string? Address, bool IsActive)
 {
@@ -188,10 +190,10 @@ public sealed record SummaryDto(Guid Id, Guid WorkerId, int Year, int Month, dec
 }
 
 public sealed record CreateWorkerRequest([Required, MaxLength(50)] string Name, [MaxLength(50)] string? EmployeeId,
-    [Range(typeof(decimal), "0", "999999.99")] decimal DailyWage);
-/// <summary>員工管理：只改有給的欄位（姓名、工號、日薪、在職）。</summary>
+    [Range(typeof(decimal), "0", "999999.99")] decimal DailyWage, Guid? PositionId = null);
+/// <summary>員工管理：只改有給的欄位（姓名、工號、日薪、在職、職位分類）；positionId 傳空 Guid 代表清空職位。</summary>
 public sealed record UpdateWorkerRequest([MaxLength(50)] string? Name, [MaxLength(50)] string? EmployeeId,
-    [Range(typeof(decimal), "0", "999999.99")] decimal? DailyWage, bool? IsActive);
+    [Range(typeof(decimal), "0", "999999.99")] decimal? DailyWage, bool? IsActive, Guid? PositionId = null);
 public sealed record CreateSiteRequest([Required] string Name, string? Address);
 /// <summary>考勤卡圖片連結；必須是 https，由 Azure 直接拉取。</summary>
 public sealed record ScanUrlRequest([Required] string Url);

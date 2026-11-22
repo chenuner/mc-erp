@@ -22,7 +22,8 @@ public static class SeedData
             ("Accounting", "支出分類", 0),
             ("AccountingDocumentType", "票據類型", 1),
             ("AccountingSiteCategory", "地盤分類", 2),
-            ("AttendanceCard", "考勤卡圖片", 3)
+            ("AttendanceCard", "考勤卡圖片", 3),
+            ("AttendancePosition", "職位分類", 4)
         };
         var existingGroups = await db.SysDictGroups.ToListAsync();
         foreach (var (code, name, sort) in systemGroups)
@@ -70,6 +71,10 @@ public static class SeedData
         // 考勤卡原圖的文件類別：掃描上傳時用它登記到 storage_files，方便在文件模組回看
         if (!await db.SysDicts.IgnoreQueryFilters().AnyAsync(dict => dict.GroupName == "AttendanceCard" && dict.Value == "card"))
             db.SysDicts.Add(new SysDict { GroupName = "AttendanceCard", Value = "card", Label = "考勤卡", Sort = 0, Enabled = true });
+
+        // 職位分類只預置「樓面員工」，其餘由用戶在系統字典維護；不主動回填或改動現有員工
+        if (!await db.SysDicts.IgnoreQueryFilters().AnyAsync(dict => dict.GroupName == "AttendancePosition" && dict.Value == "floor"))
+            db.SysDicts.Add(new SysDict { GroupName = "AttendancePosition", Value = "floor", Label = "樓面員工", Sort = 1, Enabled = true });
         await db.SaveChangesAsync();
 
         if (await db.Users.AnyAsync())

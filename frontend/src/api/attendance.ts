@@ -1,5 +1,5 @@
 import request from './request'
-import type { PagedResult } from './system'
+import { listSysDictsByGroup, type PagedResult, type SysDictDto } from './system'
 import type { OcrField } from './accounting'
 
 export interface SiteDto {
@@ -19,6 +19,9 @@ export interface WorkerDto {
   employeeId: string | null
   dailyWage: number
   isActive: boolean
+  /** 職位分類（AttendancePosition 字典），可為空。 */
+  positionId: string | null
+  position: string | null
 }
 
 /** 考勤卡同步時選員工用；日薪就是計薪用的日薪。 */
@@ -26,13 +29,18 @@ export async function listWorkers(): Promise<WorkerDto[]> {
   return await request.get('/attendance/workers') as WorkerDto[]
 }
 
-/** 卡上手寫姓名對不上任何員工時，直接用該姓名建一個工人。 */
-export async function createWorker(payload: { name: string; employeeId?: string | null; dailyWage: number }): Promise<WorkerDto> {
+/** 職位分類選項從系統字典 AttendancePosition 讀取，由用戶在「系統字典」自行維護。 */
+export async function listWorkerPositions(): Promise<SysDictDto[]> {
+  return await listSysDictsByGroup('AttendancePosition')
+}
+
+/** 卡上手寫姓名對不上任何員工時，直接用該姓名建一個工人；職位分類可選。 */
+export async function createWorker(payload: { name: string; employeeId?: string | null; dailyWage: number; positionId?: string | null }): Promise<WorkerDto> {
   return (await request.post('/attendance/workers', payload)) as WorkerDto
 }
 
-/** 改員工的姓名 / 工號 / 日薪 / 在職；只送有改的欄位。 */
-export async function updateWorker(id: string, payload: { name?: string; employeeId?: string | null; dailyWage?: number; isActive?: boolean }): Promise<WorkerDto> {
+/** 改員工的姓名 / 工號 / 日薪 / 職位 / 在職；只送有改的欄位。 */
+export async function updateWorker(id: string, payload: { name?: string; employeeId?: string | null; dailyWage?: number; isActive?: boolean; positionId?: string | null }): Promise<WorkerDto> {
   return (await request.put(`/attendance/workers/${id}`, payload)) as WorkerDto
 }
 
@@ -60,6 +68,9 @@ export interface PayrollDto extends PayrollFields {
   workerId: string
   name: string
   employeeId: string | null
+  /** 當月薪酬生成時的職位分類快照；之後改員工職位不會影響已生成的月份。 */
+  positionId: string | null
+  position: string | null
   year: number
   month: number
 }
@@ -85,16 +96,37 @@ export interface AttendanceQuery {
   month: number
   /** 只看某個員工；不填就是全部（姓名下拉選的是員工 id，重名不會混）。 */
   workerId?: string
+  /** 只看薪酬表當月職位快照符合的員工；不填就是全部。 */
+  positionId?: string
   page: number
   pageSize: number
 }
 
-export async function listPayroll(params: AttendanceQuery): Promise<PagedResult<PayrollDto>> {
-  return (await request.get('/attendance/payroll', { params })) as PagedResult<PayrollDto>
+/** 薪酬表合計，按整份篩選結果算（不是當前頁）；日薪是每人單價，不參與合計。 */
+export interface PayrollTotals {
+  workDays: number
+  laborLeaveDays: number
+  totalWorkDays: number
+  overtimeHours: number
+  overtimeAmount: number
+  mpfEmployer: number
+  mpfEmployee: number
+  actualPay: number
+  totalAmount: number
 }
 
-export async function listPunches(params: AttendanceQuery): Promise<PagedResult<PunchDto>> {
-  return (await request.get('/attendance/punches', { params })) as PagedResult<PunchDto>
+/** 打卡明細合計：打卡筆數及 O.T. 小時（明細不存工時）。 */
+export interface PunchTotals {
+  records: number
+  overtimeHours: number
+}
+
+export async function listPayroll(params: AttendanceQuery): Promise<PagedResult<PayrollDto> & { totals: PayrollTotals }> {
+  return (await request.get('/attendance/payroll', { params })) as PagedResult<PayrollDto> & { totals: PayrollTotals }
+}
+
+export async function listPunches(params: AttendanceQuery): Promise<PagedResult<PunchDto> & { totals: PunchTotals }> {
+  return (await request.get('/attendance/punches', { params })) as PagedResult<PunchDto> & { totals: PunchTotals }
 }
 
 export async function updatePayroll(id: string, payload: PayrollFields): Promise<PayrollDto> {

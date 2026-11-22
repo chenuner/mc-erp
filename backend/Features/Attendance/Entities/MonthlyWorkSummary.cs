@@ -17,6 +17,11 @@ public sealed class MonthlyWorkSummary : Entity
     /// <summary>薪酬所屬月份（1 至 12）。</summary>
     public int Month { get; set; }
 
+    /// <summary>薪酬計算當下的職位分類 ID（AttendancePosition 字典）；只作記錄，日後改員工職位不影響已生成的月份。</summary>
+    public Guid? PositionDictId { get; set; }
+    /// <summary>薪酬計算當下的職位分類標籤快照；保留歷史名稱，字典改名或停用也不影響已生成的月份。</summary>
+    public string? Position { get; set; }
+
     /// <summary>工數，支持小數。</summary>
     public decimal WorkDays { get; set; }
     /// <summary>勞工假天數，支持小數。</summary>

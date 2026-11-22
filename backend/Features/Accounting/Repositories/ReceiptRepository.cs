@@ -7,14 +7,18 @@ namespace MC.Erp.Features.Accounting.Repositories;
 public sealed record ReceiptFilter(Guid? DocumentTypeDictId = null,
     Guid? Type = null, Guid? SiteCategoryDictId = null, DateOnly? Start = null, DateOnly? End = null);
 
+/// <summary>單一幣種的金額合計；CurrencyCode 為 null 代表票據有金額但沒填幣種。</summary>
+public sealed record ReceiptCurrencyTotal(string? CurrencyCode, int Count, decimal Amount);
+
+/// <summary>整份篩選結果的金額合計。不同幣種不混加；MissingAmount 是未填金額的張數。</summary>
+public sealed record ReceiptTotals(List<ReceiptCurrencyTotal> Amounts, int MissingAmount);
+
 public sealed class ReceiptRepository(ErpDbContext db, IHttpContextAccessor context)
 {
     private CancellationToken Token => context.HttpContext?.RequestAborted ?? default;
 
-    private IQueryable<Receipt> Query(ReceiptFilter filter) => db.Receipts
-        .Include(receipt => receipt.FileItem)
-        .Include(receipt => receipt.TypeDict)
-        .Include(receipt => receipt.DocumentTypeDict).Include(receipt => receipt.SiteCategoryDict)
+    /// <summary>篩選條件（不含 Include）；列表、筆數、合計共用同一份，口徑不會漂移。</summary>
+    private IQueryable<Receipt> Filtered(ReceiptFilter filter) => db.Receipts
         // 沒有原圖的手動票據也要列出；原圖被軟刪除的票據維持不列出
         .Where(receipt => receipt.FileItemId == null
             || (receipt.FileItem != null && receipt.FileItem.TypeDict != null && receipt.FileItem.TypeDict.GroupName == "Accounting"))
@@ -24,13 +28,27 @@ public sealed class ReceiptRepository(ErpDbContext db, IHttpContextAccessor cont
         .Where(receipt => filter.Start == null || receipt.ReceiptDate >= filter.Start)
         .Where(receipt => filter.End == null || receipt.ReceiptDate <= filter.End);
 
-    public async Task<(List<Receipt> Items, int Total)> ListAsync(ReceiptFilter filter, int page, int pageSize)
+    private IQueryable<Receipt> Query(ReceiptFilter filter) => Filtered(filter)
+        .Include(receipt => receipt.FileItem)
+        .Include(receipt => receipt.TypeDict)
+        .Include(receipt => receipt.DocumentTypeDict).Include(receipt => receipt.SiteCategoryDict);
+
+    public async Task<(List<Receipt> Items, int Total, ReceiptTotals Totals)> ListAsync(
+        ReceiptFilter filter, int page, int pageSize)
     {
         var query = Query(filter).AsNoTracking();
         var total = await query.CountAsync(Token);
         var items = await query.OrderByDescending(receipt => receipt.ReceiptDate).ThenByDescending(receipt => receipt.Id)
             .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(Token);
-        return (items, total);
+        // 合計按整份篩選結果算，不受分頁影響；幣種分開，HKD / CNY / USD 不會加在一起
+        var amounts = await Filtered(filter).AsNoTracking()
+            .Where(receipt => receipt.Amount != null)
+            .GroupBy(receipt => receipt.CurrencyCode)
+            .Select(group => new ReceiptCurrencyTotal(group.Key, group.Count(), group.Sum(receipt => receipt.Amount) ?? 0m))
+            .ToListAsync(Token);
+        // 未填幣種的排最後，其餘按幣種字母序，合計行順序穩定
+        amounts = amounts.OrderBy(item => item.CurrencyCode is null).ThenBy(item => item.CurrencyCode, StringComparer.Ordinal).ToList();
+        return (items, total, new ReceiptTotals(amounts, total - amounts.Sum(item => item.Count)));
     }
 
     public Task<List<Receipt>> ExportAsync(ReceiptFilter filter) => Query(filter).AsNoTracking()

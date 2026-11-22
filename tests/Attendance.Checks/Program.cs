@@ -1,9 +1,13 @@
 using System.ClientModel.Primitives;
 using System.Globalization;
+using System.Text.Json;
 using Azure.AI.DocumentIntelligence;
+using MC.Erp.Common;
 using MC.Erp.Common.Infrastructure.Ocr;
+using MC.Erp.Features.Attendance.Endpoints;
 using MC.Erp.Features.Attendance.Entities;
 using MC.Erp.Features.Attendance.Services;
+using MC.Erp.Features.System.Entities;
 
 var checks = 0;
 void Check(bool condition, string message)
@@ -225,15 +229,15 @@ var strict = new AttendanceCardScan
     Year = 2026, YearConfidence = 0.4f, Month = 10, MonthConfidence = 1f,
     Name = "朱駿豪", NameConfidence = 0.7f, ReviewFields = ["layout"]
 };
-Check(UpdateCardScanRequest.ReviewFieldsOf(strict, includeHandwritten: true).SequenceEqual(["layout", "year", "name"]),
+Check(CardReviewRules.ReviewFieldsOf(strict, includeHandwritten: true).SequenceEqual(["layout", "year", "name"]),
     "Asking to include handwritten fields puts the low-confidence ones back in review");
-Check(UpdateCardScanRequest.ReviewFieldsOf(strict, includeHandwritten: false).SequenceEqual(["layout"]),
+Check(CardReviewRules.ReviewFieldsOf(strict, includeHandwritten: false).SequenceEqual(["layout"]),
     "By default handwritten fields stay out of review");
 
 // 人工標記為已核對：卡片層標記清空，時間欄不動（先用 IncludeHandwritten 檢查一次，再按「標記為已核對」清掉）
 new UpdateCardScanRequest(2026, 10, null, [], IncludeHandwritten: true).ApplyTo(corrected);
-Check(corrected.ReviewFields.SequenceEqual(["layout", "year", "month", "name"]),
-    "Checking the handwritten switch flags the low-confidence handwritten fields");
+Check(corrected.ReviewFields.SequenceEqual(["layout", "year", "name"]),
+    "Checking the handwritten switch flags only the still-unconfirmed handwritten fields");
 var confirmedBefore = corrected.Punches[1].AmIn;
 corrected.ReviewFields = [];
 Check(corrected.ReviewFields.Count == 0 && corrected.Punches[1].AmIn == confirmedBefore,
@@ -303,5 +307,32 @@ var (monthStart, monthEnd) = AttendanceRules.MonthRange(2026, 10);
 Check(monthStart == new DateTime(2026, 9, 30, 16, 0, 0, DateTimeKind.Utc)
     && monthEnd == new DateTime(2026, 10, 31, 16, 0, 0, DateTimeKind.Utc),
     "A Hong Kong month maps to the UTC range shared with the attendance tables");
+
+// --- 列表合計（totals）---
+// 合計跟 items 一起回，按整份篩選結果算；日薪是每人單價，不能出現在合計裡。
+var totalsWorker = new Worker { Name = "陳大文", EmployeeId = "W001", DailyWage = 900m };
+var floorPosition = new SysDict { GroupName = "AttendancePosition", Value = "floor", Label = "樓面員工" };
+var payrollPage = new PagedResult<PayrollDto, PayrollTotals>(
+    [PayrollDto.From(new MonthlyWorkSummary
+    {
+        Worker = totalsWorker, Year = 2026, Month = 10, WorkDays = 22m, DailyWage = 900m,
+        PositionDictId = floorPosition.Id, Position = floorPosition.Label
+    })],
+    2, 1, 1, new PayrollTotals(22m, 1m, 23m, 6.5m, 1096.88m, 1150m, 1150m, 20646.88m, 22946.88m));
+Check(payrollPage.Items[0].Position == "樓面員工" && payrollPage.Items[0].PositionId == floorPosition.Id,
+    "Payroll keeps the position category recorded with that month");
+var workerDto = WorkerDto.From(new Worker
+{
+    Name = totalsWorker.Name, DailyWage = totalsWorker.DailyWage,
+    PositionDictId = floorPosition.Id, Position = floorPosition
+});
+Check(workerDto.Position == "樓面員工" && workerDto.PositionId == floorPosition.Id,
+    "Worker keeps the optional position category");
+using var totalsJson = JsonDocument.Parse(JsonSerializer.Serialize(payrollPage, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+var totalsNode = totalsJson.RootElement.GetProperty("totals");
+Check(totalsNode.GetProperty("workDays").GetDecimal() == 22m && totalsNode.GetProperty("totalAmount").GetDecimal() == 22946.88m,
+    "Payroll totals are serialized next to items and cover the whole filtered result");
+Check(!totalsNode.TryGetProperty("dailyWage", out _),
+    "Payroll totals never add up the per-person daily wage");
 
 Console.WriteLine($"PASS: {checks} attendance checks (no Azure calls)");

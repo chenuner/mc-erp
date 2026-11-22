@@ -27,7 +27,7 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
     IOcrService ocr, ILogger<ReceiptService> logger)
 {
     public bool OcrConfigured => ocr.IsConfigured;
-    public Task<(List<Receipt> Items, int Total)> ListAsync(ReceiptFilter filter, int page, int pageSize)
+    public Task<(List<Receipt> Items, int Total, ReceiptTotals Totals)> ListAsync(ReceiptFilter filter, int page, int pageSize)
         => repo.ListAsync(filter, page, pageSize);
     public async Task<Receipt> FindAsync(Guid id) => await repo.FindAsync(id) ?? throw new KeyNotFoundException("票據不存在");
 

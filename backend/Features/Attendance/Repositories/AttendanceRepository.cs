@@ -8,11 +8,11 @@ public sealed class AttendanceRepository(ErpDbContext db) : IAttendanceRepositor
 {
     // --- Worker ---
     public Task<Worker?> GetWorkerByIdAsync(Guid id, CancellationToken ct = default)
-        => db.Workers.FirstOrDefaultAsync(w => w.Id == id, ct);
+        => db.Workers.Include(w => w.Position).FirstOrDefaultAsync(w => w.Id == id, ct);
 
     // 停用的員工仍要列出來（員工管理要能再啟用），只排除已刪除的
     public Task<List<Worker>> GetAllWorkersAsync(CancellationToken ct = default)
-        => db.Workers.Where(w => !w.IsDeleted).OrderBy(w => w.Name).ToListAsync(ct);
+        => db.Workers.Include(w => w.Position).Where(w => !w.IsDeleted).OrderBy(w => w.Name).ToListAsync(ct);
 
     public async Task AddWorkerAsync(Worker worker, CancellationToken ct = default)
     {

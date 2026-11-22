@@ -321,7 +321,8 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
         if (scan.Year is not { } year || scan.Month is not { } month)
             throw new InvalidOperationException("這張考勤卡沒有年月，請先在識別結果裡補上再同步");
 
-        var worker = await db.Workers.FirstOrDefaultAsync(item => item.Id == request.WorkerId && !item.IsDeleted, ct)
+        var worker = await db.Workers.Include(item => item.Position)
+            .FirstOrDefaultAsync(item => item.Id == request.WorkerId && !item.IsDeleted, ct)
             ?? throw new KeyNotFoundException("員工不存在");
         var site = await db.Sites.FirstOrDefaultAsync(item => item.Id == request.SiteId && !item.IsDeleted, ct)
             ?? throw new KeyNotFoundException("地盤不存在");
@@ -359,6 +360,9 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
             summary = new MonthlyWorkSummary { WorkerId = worker.Id, Year = year, Month = month, Remark = "由考勤卡自動計算" };
             db.MonthlyWorkSummaries.Add(summary);
         }
+        // 薪酬表記錄生成當下的職位快照；之後改員工職位不影響已生成的月份
+        summary.PositionDictId = worker.PositionDictId;
+        summary.Position = worker.Position?.Label;
         // 勞工假不在卡上，ApplyPayroll 沿用薪酬表原有的值
         AttendanceRules.ApplyPayroll(summary, worker.DailyWage, AttendanceRules.WorkDaysOf(all),
             all.Sum(record => record.OvertimeHours));

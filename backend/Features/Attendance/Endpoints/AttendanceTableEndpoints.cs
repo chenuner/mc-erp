@@ -20,20 +20,24 @@ public static class AttendanceTableEndpoints
     private static bool ValidQuery(int year, int month, int page, int pageSize)
         => year is >= 2000 and <= 2099 && month is >= 1 and <= 12 && page is >= 1 and <= 100000 && pageSize is >= 1 and <= 100;
 
-    private static async Task<Results<Ok<PagedResult<PayrollDto>>, ValidationProblem>> GetPayrollAsync(
-        int year, int month, AttendanceTableService svc, CancellationToken ct, Guid? workerId = null, int page = 1, int pageSize = 20)
+    // 合計（totals）按整份篩選結果算，跟是否分頁無關；前端合計行直接用，不要對當前頁加總。
+    private static async Task<Results<Ok<PagedResult<PayrollDto, PayrollTotals>>, ValidationProblem>> GetPayrollAsync(
+        int year, int month, AttendanceTableService svc, CancellationToken ct,
+        Guid? workerId = null, Guid? positionId = null, int page = 1, int pageSize = 20)
     {
         if (!ValidQuery(year, month, page, pageSize)) return InvalidQuery();
-        var result = await svc.GetPayrollAsync(year, month, workerId, page, pageSize, ct);
-        return TypedResults.Ok(new PagedResult<PayrollDto>(result.Items.Select(PayrollDto.From).ToList(), result.Total, page, pageSize));
+        var result = await svc.GetPayrollAsync(year, month, workerId, positionId, page, pageSize, ct);
+        return TypedResults.Ok(new PagedResult<PayrollDto, PayrollTotals>(
+            result.Items.Select(PayrollDto.From).ToList(), result.Total, page, pageSize, result.Totals));
     }
 
-    private static async Task<Results<Ok<PagedResult<PunchDto>>, ValidationProblem>> GetPunchesAsync(
+    private static async Task<Results<Ok<PagedResult<PunchDto, PunchTotals>>, ValidationProblem>> GetPunchesAsync(
         int year, int month, AttendanceTableService svc, CancellationToken ct, Guid? workerId = null, int page = 1, int pageSize = 20)
     {
         if (!ValidQuery(year, month, page, pageSize)) return InvalidQuery();
         var result = await svc.GetPunchesAsync(year, month, workerId, page, pageSize, ct);
-        return TypedResults.Ok(new PagedResult<PunchDto>(result.Items.Select(PunchDto.From).ToList(), result.Total, page, pageSize));
+        return TypedResults.Ok(new PagedResult<PunchDto, PunchTotals>(
+            result.Items.Select(PunchDto.From).ToList(), result.Total, page, pageSize, result.Totals));
     }
 
     private static ValidationProblem InvalidQuery() => TypedResults.ValidationProblem(new Dictionary<string, string[]>
@@ -114,13 +118,14 @@ public static class AttendanceTableEndpoints
     }
 }
 
-/// <summary>員工薪酬表，金額單位為港元。</summary>
-public sealed record PayrollDto(Guid Id, Guid WorkerId, string Name, string? EmployeeId, int Year, int Month,
+/// <summary>員工薪酬表，金額單位為港元。職位分類是當月薪酬生成時的快照。</summary>
+public sealed record PayrollDto(Guid Id, Guid WorkerId, string Name, string? EmployeeId,
+    Guid? PositionId, string? Position, int Year, int Month,
     decimal WorkDays, decimal LaborLeaveDays, decimal TotalWorkDays, decimal OvertimeHours, decimal DailyWage,
     decimal OvertimeAmount, decimal MpfEmployer, decimal MpfEmployee, decimal ActualPay, decimal TotalAmount, string? Remark)
 {
     public static PayrollDto From(MonthlyWorkSummary row) => new(row.Id, row.WorkerId, row.Worker.Name, row.Worker.EmployeeId,
-        row.Year, row.Month, row.WorkDays, row.LaborLeaveDays, row.TotalWorkDays, row.OvertimeHours, row.DailyWage,
+        row.PositionDictId, row.Position, row.Year, row.Month, row.WorkDays, row.LaborLeaveDays, row.TotalWorkDays, row.OvertimeHours, row.DailyWage,
         row.OvertimeAmount, row.MpfEmployer, row.MpfEmployee, row.ActualPay, row.TotalAmount, row.Remark);
 }
 

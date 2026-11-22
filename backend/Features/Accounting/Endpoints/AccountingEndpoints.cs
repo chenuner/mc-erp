@@ -23,8 +23,9 @@ public static class AccountingEndpoints
             var currentPage = Math.Clamp(page ?? 1, 1, 1000000);
             var size = Math.Clamp(pageSize ?? 20, 1, 100);
             var result = await service.ListAsync(filter, currentPage, size);
-            return TypedResults.Ok(new PagedResult<ReceiptResponse>(
-                result.Items.Select(ReceiptResponse.From).ToList(), result.Total, currentPage, size));
+            // totals 按整份篩選結果算（不是當前頁）；金額按幣種分開，不混加
+            return TypedResults.Ok(new PagedResult<ReceiptResponse, ReceiptTotals>(
+                result.Items.Select(ReceiptResponse.From).ToList(), result.Total, currentPage, size, result.Totals));
         });
         group.MapPost("/receipts", async (CreateReceiptRequest request, ReceiptService service) =>
         {

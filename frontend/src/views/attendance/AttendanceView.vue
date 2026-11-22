@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { ElLoading, ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import AppIcon from '@/components/AppIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import {
   confirmCardScan, createWorker, deleteCardScan, deleteWorker, getCardScan, initializeAttendanceMock, listCardScans,
-  listPayroll, listPunches, listSites, listWorkers, scanAttendanceCard, syncCardScan, updateCardScan, updatePayroll,
-  updatePunch, updateWorker,
+  listPayroll, listPunches, listSites, listWorkerPositions, listWorkers, scanAttendanceCard, syncCardScan, updateCardScan,
+  updatePayroll, updatePunch, updateWorker,
   type AttendanceCardScanDto, type AttendanceCardScanSummaryDto, type AttendanceRow, type PayrollDto,
-  type PayrollFields, type PunchDto, type SiteDto, type WorkerDto,
+  type PayrollFields, type PayrollTotals, type PunchDto, type PunchTotals, type SiteDto, type WorkerDto,
 } from '@/api/attendance'
+import type { SysDictDto } from '@/api/system'
 import type { OcrField } from '@/api/accounting'
 
 type NumericField = Exclude<keyof PayrollFields, 'remark'>
@@ -30,8 +31,14 @@ const auth = useAuthStore()
 const isAdmin = computed(() => auth.roles.includes('Admin'))
 const activeTab = ref<'payroll' | 'punches' | 'cards'>('payroll')
 const now = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Hong_Kong', year: 'numeric', month: '2-digit' }).formatToParts(new Date())
-const month = ref(`${now.find(part => part.type === 'year')?.value}-${now.find(part => part.type === 'month')?.value}`)
+/** 香港時區的當前月份，也是打開頁面時的預設篩選。 */
+const currentMonth = `${now.find(part => part.type === 'year')?.value}-${now.find(part => part.type === 'month')?.value}`
+const month = ref(currentMonth)
+/** 上次選過的月份：薪酬表／打卡明細的月份必填（後端按年月查），從「全部年月」切回來時用它恢復。 */
+let lastMonth = month.value
 const workerFilter = ref('')
+/** 薪酬表專用：按當月職位快照篩選；打卡明細沒有職位欄，切到其他 tab 時不帶這個條件。 */
+const positionFilter = ref('')
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
@@ -40,6 +47,9 @@ const initializing = ref(false)
 const payroll = ref<PayrollDto[]>([])
 const punches = ref<PunchDto[]>([])
 const cards = ref<AttendanceCardScanSummaryDto[]>([])
+/** 合計按整份篩選結果算，跟當前頁無關；後端回傳，不由前端對本頁加總。 */
+const payrollTotals = ref<PayrollTotals | null>(null)
+const punchTotals = ref<PunchTotals | null>(null)
 let requestId = 0
 
 const numberFormatter = new Intl.NumberFormat('zh-HK', { maximumFractionDigits: 2 })
@@ -56,7 +66,36 @@ function localTime(iso: string | null): string {
   return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}:${part('second')}`
 }
 
-function selectedMonth() {
+/** 合計行只顯示這些欄位；日薪是每人單價，不加總。 */
+const payrollTotalKeys: (keyof PayrollTotals)[] = [
+  'workDays', 'laborLeaveDays', 'totalWorkDays', 'overtimeHours',
+  'overtimeAmount', 'mpfEmployer', 'mpfEmployee', 'actualPay', 'totalAmount',
+]
+
+/** 薪酬表合計行；總數按篩選結果的人數，不是本頁行數。 */
+function payrollSummary({ columns: tableColumns }: { columns: { property?: string }[] }): string[] {
+  const totals = payrollTotals.value
+  return tableColumns.map((column, index) => {
+    if (index === 0) return totals ? `合計（${total.value} 人）` : ''
+    const key = column.property as keyof PayrollTotals | undefined
+    if (!key || !totals || !payrollTotalKeys.includes(key)) return ''
+    const money = columns.find(item => item.key === key)?.money ?? false
+    return (money ? moneyFormatter : numberFormatter).format(totals[key])
+  })
+}
+
+/** 打卡明細合計行：O.T. 小時合計；打卡筆數就是 total。 */
+function punchSummary({ columns: tableColumns }: { columns: { property?: string }[] }): string[] {
+  const totals = punchTotals.value
+  return tableColumns.map((column, index) => {
+    if (index === 0) return totals ? `合計（${total.value} 筆）` : ''
+    return column.property === 'overtimeHours' && totals ? numberFormatter.format(totals.overtimeHours) : ''
+  })
+}
+
+/** 目前選的年月；考勤卡識別可以清空＝查全部年月，另外兩個分頁的月份必填。 */
+function selectedMonth(): { year: number; month: number } | null {
+  if (!month.value) return null
   const [year, monthNumber] = month.value.split('-').map(Number)
   return { year: year!, month: monthNumber! }
 }
@@ -66,24 +105,42 @@ async function fetchRows() {
   loading.value = true
   try {
     if (activeTab.value === 'cards') {
-      // 考勤卡列表按年月篩，但年份月份可能識別不出來，所以不帶姓名條件
+      // 考勤卡按年月篩；年月可以留空＝全部（識別不出年月的記錄只有這樣才看得到），也不帶姓名條件
       const selected = selectedMonth()
-      const result = await listCardScans({ year: selected.year, month: selected.month, page: page.value, pageSize: pageSize.value })
+      const result = await listCardScans({
+        year: selected?.year, month: selected?.month, page: page.value, pageSize: pageSize.value,
+      })
       if (id !== requestId) return
       cards.value = result.items
       total.value = result.total
     } else {
-      const params = { ...selectedMonth(), workerId: workerFilter.value || undefined, page: page.value, pageSize: pageSize.value }
+      const selected = selectedMonth()
+      // 薪酬表／打卡明細的月份是必填；正常不會為空，真為空就恢復上次月份再查
+      if (!selected) {
+        month.value = lastMonth
+        return
+      }
+      const params = {
+        ...selected,
+        workerId: workerFilter.value || undefined,
+        positionId: activeTab.value === 'payroll' ? positionFilter.value || undefined : undefined,
+        page: page.value,
+        pageSize: pageSize.value,
+      }
       if (activeTab.value === 'payroll') {
         const result = await listPayroll(params)
         if (id !== requestId) return
         payroll.value = result.items
         total.value = result.total
+        payrollTotals.value = result.totals
+        punchTotals.value = null
       } else {
         const result = await listPunches(params)
         if (id !== requestId) return
         punches.value = result.items
         total.value = result.total
+        punchTotals.value = result.totals
+        payrollTotals.value = null
       }
     }
     if (page.value > 1 && (page.value - 1) * pageSize.value >= total.value) page.value = 1
@@ -92,6 +149,8 @@ async function fetchRows() {
       payroll.value = []
       punches.value = []
       cards.value = []
+      payrollTotals.value = null
+      punchTotals.value = null
       total.value = 0
     }
   } finally {
@@ -105,10 +164,27 @@ function search() {
   else fetchRows()
 }
 
-watch([month, activeTab, pageSize], () => {
+/** 薪酬表／打卡明細的重置：清空姓名、職位，月份回到當前月（月份必填，不能清空）。 */
+function resetFilters() {
+  workerFilter.value = ''
+  positionFilter.value = ''
+  // 月份有變就由 watch 重查；沒變就自己在原地重查一次
+  if (month.value !== currentMonth) month.value = currentMonth
+  else search()
+}
+
+watch([month, activeTab, pageSize], ([selected, tab]) => {
+  if (selected) lastMonth = selected
+  // 薪酬表／打卡明細的月份必填：從考勤卡的「全部年月」切回來時先補回上次月份，下一輪 watch 再查
+  if (tab !== 'cards' && !selected) {
+    month.value = lastMonth
+    return
+  }
   payroll.value = []
   punches.value = []
   cards.value = []
+  payrollTotals.value = null
+  punchTotals.value = null
   total.value = 0
   if (page.value !== 1) page.value = 1
   else fetchRows()
@@ -121,6 +197,12 @@ onMounted(() => {
 })
 
 async function initializeMock() {
+  // 模擬數據按月份生成，必須先選月份（考勤卡識別頁可以把月份清空）
+  const selected = selectedMonth()
+  if (!selected) {
+    ElMessage.warning('請先選擇月份')
+    return
+  }
   try {
     await ElMessageBox.confirm(`初始化 ${month.value} 的模擬打卡及薪酬？已有月結不會被覆蓋。`, '初始化模擬數據', {
       confirmButtonText: '初始化', cancelButtonText: '取消', type: 'warning',
@@ -128,7 +210,6 @@ async function initializeMock() {
   } catch { return }
   initializing.value = true
   try {
-    const selected = selectedMonth()
     const result = await initializeAttendanceMock(selected.year, selected.month)
     ElMessage.success(result.added > 0 ? `已初始化 ${result.added} 名員工的模擬數據` : '該月份已有模擬數據，未覆蓋')
     await fetchRows()
@@ -217,6 +298,7 @@ const cardLoading = ref(false)
 const cardSaving = ref(false)
 const workers = ref<WorkerDto[]>([])
 const sites = ref<SiteDto[]>([])
+const positions = ref<SysDictDto[]>([])
 const syncWorkerId = ref('')
 const syncSiteId = ref('')
 const syncing = ref(false)
@@ -396,11 +478,25 @@ function locateMonth(year: number | null, monthNumber: number | null): boolean {
   return true
 }
 
-/** 員工和地盤清單只在第一次用到時載入；同步要選人、選地盤。 */
+/** 重新載入職位分類；職位是選填，載入失敗不影響其他功能。 */
+async function reloadPositions() {
+  try {
+    positions.value = await listWorkerPositions()
+    if (positionFilter.value && !positions.value.some(item => item.id === positionFilter.value)) {
+      positionFilter.value = ''
+      if (activeTab.value === 'payroll') void fetchRows()
+    }
+  } catch {
+    positions.value = []
+  }
+}
+
+/** 員工、地盤和職位分類清單只在第一次用到時載入；同步要選人、選地盤，篩選和員工表單要職位。 */
 async function ensureOptions() {
   await Promise.all([
     workers.value.length ? Promise.resolve() : listWorkers().then(rows => { workers.value = rows }).catch(() => {}),
     sites.value.length ? Promise.resolve() : listSites().then(rows => { sites.value = rows }).catch(() => {}),
+    positions.value.length ? Promise.resolve() : reloadPositions(),
   ])
 }
 
@@ -444,33 +540,32 @@ const unmatchedName = computed(() => {
   return name && !workers.value.some(worker => worker.name === name) ? name : ''
 })
 
-/** 用卡上的姓名建工人，日薪由使用者補；建好即選中。 */
+/** 用卡上的姓名預填新增員工表單，職位、工號、日薪、在職都在這裡一起填。 */
 async function createWorkerFromCard() {
   const name = unmatchedName.value
   if (!name) return
-  let wage: string
-  try {
-    const result = await ElMessageBox.prompt('日薪（HK$），之後可在薪酬表修改', `新建工人：${name}`, {
-      confirmButtonText: '新建', cancelButtonText: '取消', inputValue: '0',
-      inputPattern: /^\d+(\.\d{1,2})?$/, inputErrorMessage: '請輸入 0 或正數，最多兩位小數',
-    })
-    wage = result.value
-  } catch { return }
-  try {
-    const worker = await createWorker({ name, dailyWage: Number(wage) })
-    workers.value = [...workers.value, worker]
-    syncWorkerId.value = worker.id
-    ElMessage.success(`已新建工人 ${worker.name}`)
-  } catch { /* 已由攔截器提示 */ }
+  // 職位分類可能還沒載入（沒開過員工管理），先補上再開表單
+  if (!positions.value.length) await reloadPositions()
+  resetWorkerForm()
+  workerForm.name = name
+  workerEditDialog.value = true
 }
 
-/** 員工管理：姓名、工號、日薪、在職。日薪是計薪基礎，所以在這裡維護而不是散在薪酬表。 */
+/** 員工管理：姓名、工號、職位分類、日薪、在職。日薪是計薪基礎，所以在這裡維護而不是散在薪酬表。 */
 const workerDialog = ref(false)
 const workerEditDialog = ref(false)
 const workerRows = ref<WorkerDto[]>([])
 const workerLoading = ref(false)
 const workerSaving = ref(false)
-const workerForm = reactive({ id: '', name: '', employeeId: '', dailyWage: 0, isActive: true })
+const workerForm = reactive({ id: '', name: '', employeeId: '', dailyWage: 0, isActive: true, positionId: '' })
+
+/** 後端約定：更新員工時 positionId 傳空 Guid 代表清空職位，不傳代表不改。 */
+const EMPTY_GUID = '00000000-0000-0000-0000-000000000000'
+
+/** 新員工預設選字典第一個啟用職位（通常是樓面員工）；職位是可選的，可以清空。 */
+function firstEnabledPositionId() {
+  return positions.value.find(item => item.enabled)?.id ?? ''
+}
 
 function resetWorkerForm() {
   workerForm.id = ''
@@ -478,15 +573,18 @@ function resetWorkerForm() {
   workerForm.employeeId = ''
   workerForm.dailyWage = 0
   workerForm.isActive = true
+  workerForm.positionId = firstEnabledPositionId()
 }
 
 async function openWorkers() {
   workerDialog.value = true
-  await reloadWorkers()
+  await Promise.all([reloadWorkers(), reloadPositions()])
 }
 
-/** 新增：清空表單再開編輯框。 */
-function startCreateWorker() {
+/** 新增：清空表單再開編輯框；職位下拉要先有系統字典的選項。 */
+async function startCreateWorker() {
+  // 字典可能還沒載入或剛好被清掉，先確保有選項再把表單打開
+  if (!positions.value.length) await reloadPositions()
   resetWorkerForm()
   workerEditDialog.value = true
 }
@@ -511,6 +609,7 @@ function editWorker(row: WorkerDto) {
   workerForm.employeeId = row.employeeId ?? ''
   workerForm.dailyWage = row.dailyWage
   workerForm.isActive = row.isActive
+  workerForm.positionId = row.positionId ?? ''
   workerEditDialog.value = true
 }
 
@@ -525,10 +624,17 @@ async function saveWorker() {
     if (workerForm.id) {
       await updateWorker(workerForm.id, {
         name, employeeId: workerForm.employeeId.trim(), dailyWage: workerForm.dailyWage, isActive: workerForm.isActive,
+        // 空 Guid 代表清空職位；不帶欄位則保持原值
+        positionId: workerForm.positionId || EMPTY_GUID,
       })
       ElMessage.success('員工已更新')
     } else {
-      await createWorker({ name, employeeId: workerForm.employeeId.trim() || null, dailyWage: workerForm.dailyWage })
+      const created = await createWorker({
+        name, employeeId: workerForm.employeeId.trim() || null, dailyWage: workerForm.dailyWage,
+        positionId: workerForm.positionId || null,
+      })
+      // 從考勤卡「新建為工人」進來的，建好直接選中，接著就能同步
+      if (!workerDialog.value) syncWorkerId.value = created.id
       ElMessage.success(`已新增員工 ${name}`)
     }
     workerEditDialog.value = false
@@ -599,6 +705,8 @@ function pickCard(event: Event) {
 /** 上傳即識別並保存，完成後跳到識別到的年月並打開明細讓使用者對照原圖核對。 */
 async function scanCard(file: File) {
   scanning.value = true
+  // 識別要等 Azure（可能幾十秒），用全螢幕遮罩讓使用者知道還在跑、不要重複點上傳
+  const overlay = ElLoading.service({ fullscreen: true, lock: true, text: '考勤卡識別中，請稍候…' })
   try {
     const [scan] = await Promise.all([scanAttendanceCard(file), ensureOptions()])
     const rows = scan.card.records.filter(hasTime)
@@ -620,7 +728,10 @@ async function scanCard(file: File) {
       ElMessage.warning('沒有認出年月，這筆記錄不會出現在按月份篩選的列表；請在明細裡雙擊年月補上再保存')
     }
   } catch { /* 已由攔截器提示 */ }
-  finally { scanning.value = false }
+  finally {
+    overlay.close()
+    scanning.value = false
+  }
 }
 
 async function openCard(row: AttendanceCardScanSummaryDto) {
@@ -721,7 +832,7 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
           <AppIcon name="image" :size="16" class="button-icon" />拍照識別考勤卡
         </el-button>
         <el-button :loading="scanning" @click="albumInput?.click()">選擇考勤卡圖片</el-button>
-        <el-button @click="initializeMock">
+        <el-button :disabled="!month" @click="initializeMock">
           <AppIcon name="plus" :size="16" class="button-icon" />初始化模擬數據
         </el-button>
         <el-button v-if="isAdmin" @click="openWorkers">
@@ -742,7 +853,8 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
       <div class="filter-field">
         <label for="attendance-month">月份</label>
         <el-date-picker id="attendance-month" v-model="month" type="month" value-format="YYYY-MM" format="YYYY年MM月"
-          :clearable="false" :disabled="initializing" :disabled-date="(date: Date) => date.getFullYear() < 2000 || date.getFullYear() > 2099" />
+          :clearable="activeTab === 'cards'" :placeholder="activeTab === 'cards' ? '全部年月' : '請選擇月份'"
+          :disabled="initializing" :disabled-date="(date: Date) => date.getFullYear() < 2000 || date.getFullYear() > 2099" />
       </div>
       <div class="filter-field">
         <label for="attendance-name">姓名</label>
@@ -751,15 +863,27 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
           <el-option v-for="worker in workers" :key="worker.id" :label="worker.name" :value="worker.id" />
         </el-select>
       </div>
+      <div v-if="activeTab === 'payroll'" class="filter-field">
+        <label for="attendance-position">職位分類</label>
+        <el-select id="attendance-position" v-model="positionFilter" filterable clearable placeholder="全部職位" @change="search">
+          <el-option v-for="position in positions" :key="position.id"
+            :label="position.enabled ? position.label : `${position.label}（停用）`" :value="position.id" />
+        </el-select>
+      </div>
       <el-button type="primary" native-type="submit"><AppIcon name="search" :size="16" class="button-icon" />查詢</el-button>
+      <el-button v-if="activeTab !== 'cards'" :disabled="initializing || loading" @click="resetFilters">重置</el-button>
       <el-tooltip content="刷新" placement="top">
         <el-button :disabled="loading" circle aria-label="刷新" @click="fetchRows"><AppIcon name="refresh-cw" :size="16" /></el-button>
       </el-tooltip>
     </form>
 
     <div class="table-region">
-      <el-table v-if="activeTab === 'payroll'" v-loading="loading" :data="payroll" stripe row-key="id" max-height="600">
+      <el-table v-if="activeTab === 'payroll'" v-loading="loading" :data="payroll" stripe row-key="id" max-height="600"
+        :show-summary="payroll.length > 0" :summary-method="payrollSummary">
         <el-table-column prop="name" label="姓名" width="110" fixed show-overflow-tooltip />
+        <el-table-column label="職位分類" width="120" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.position || '—' }}</template>
+        </el-table-column>
         <el-table-column v-for="column in columns" :key="column.key" :prop="column.key" :label="column.label" :width="column.width" align="right">
           <template #default="{ row }">
             <span class="num">{{ (column.money ? moneyFormatter : numberFormatter).format(row[column.key]) }}</span>
@@ -778,7 +902,8 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
         <template #empty><el-empty description="該月份暫無薪酬資料" :image-size="72" /></template>
       </el-table>
 
-      <el-table v-else-if="activeTab === 'punches'" v-loading="loading" :data="punches" stripe row-key="id" max-height="600">
+      <el-table v-else-if="activeTab === 'punches'" v-loading="loading" :data="punches" stripe row-key="id" max-height="600"
+        :show-summary="punches.length > 0" :summary-method="punchSummary">
         <el-table-column prop="name" label="姓名" width="110" fixed show-overflow-tooltip />
         <el-table-column prop="employeeId" label="工號" width="125" />
         <el-table-column prop="siteName" label="地盤" min-width="140" show-overflow-tooltip />
@@ -788,7 +913,7 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
         <el-table-column label="下班打卡（香港時間）" width="205">
           <template #default="{ row }"><span class="num">{{ localTime(row.clockOutTime) || '—' }}</span></template>
         </el-table-column>
-        <el-table-column label="O.T.(小時)" width="110" align="right">
+        <el-table-column prop="overtimeHours" label="O.T.(小時)" width="110" align="right">
           <template #default="{ row }"><span class="num">{{ numberFormatter.format(row.overtimeHours) }}</span></template>
         </el-table-column>
         <el-table-column label="勞工假" width="90" align="center">
@@ -832,7 +957,9 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
           </template>
         </el-table-column>
         <template #empty>
-          <el-empty description="該月份暫無考勤卡掃描記錄，可按右上角「拍照識別考勤卡」上傳" :image-size="72" />
+          <el-empty :description="month
+            ? '該月份暫無考勤卡掃描記錄，可按右上角「拍照識別考勤卡」上傳'
+            : '暫無考勤卡掃描記錄，可按右上角「拍照識別考勤卡」上傳'" :image-size="72" />
         </template>
       </el-table>
       <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[20, 50, 100]"
@@ -943,7 +1070,7 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
 
     <el-dialog v-model="workerDialog" title="員工管理" width="min(820px, calc(100vw - 32px))" class="attendance-dialog">
       <div class="worker-toolbar">
-        <span class="worker-toolbar-hint">姓名、工號、日薪都在這裡維護；日薪是計薪基礎（O.T. 時薪＝日薪÷8×1.5）。</span>
+        <span class="worker-toolbar-hint">姓名、工號、職位分類、日薪都在這裡維護；職位分類在「系統字典 → 職位分類」維護。日薪是計薪基礎（O.T. 時薪＝日薪÷8×1.5）。</span>
         <el-button type="primary" @click="startCreateWorker">
           <AppIcon name="plus" :size="16" class="button-icon" />新增員工
         </el-button>
@@ -952,6 +1079,9 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
         <el-table-column prop="name" label="姓名" min-width="110" show-overflow-tooltip />
         <el-table-column label="工號" width="120">
           <template #default="{ row }">{{ row.employeeId || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="職位分類" width="120" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.position || '—' }}</template>
         </el-table-column>
         <el-table-column label="日薪（HK$）" width="120" align="right">
           <template #default="{ row }"><span class="num">{{ moneyFormatter.format(row.dailyWage) }}</span></template>
@@ -973,7 +1103,7 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
       <p class="card-hint">停用＝暫時不出現在同步的員工下拉，薪酬查詢照舊看得到；刪除＝軟刪除，薪酬表和打卡明細都不再顯示（記錄仍在庫裡）。</p>
     </el-dialog>
 
-    <el-dialog v-model="workerEditDialog" :title="workerForm.id ? '編輯員工' : '新增員工'"
+    <el-dialog v-model="workerEditDialog" :title="workerForm.id ? '編輯員工' : '新增員工'" append-to-body
       width="min(560px, calc(100vw - 32px))" class="attendance-dialog" :close-on-click-modal="false"
       @closed="resetWorkerForm">
       <el-form label-position="top" @submit.prevent>
@@ -983,6 +1113,17 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
           </el-form-item>
           <el-form-item label="工號">
             <el-input v-model="workerForm.employeeId" maxlength="50" placeholder="選填" :disabled="workerSaving" />
+          </el-form-item>
+          <el-form-item label="職位分類">
+            <el-select v-model="workerForm.positionId" clearable filterable placeholder="請選擇" :disabled="workerSaving"
+              no-data-text="尚未配置職位分類，請先到「系統字典 → 職位分類」新增">
+              <el-option v-for="position in positions" :key="position.id"
+                :label="position.enabled ? position.label : `${position.label}（停用）`"
+                :value="position.id" :disabled="!position.enabled && position.id !== workerForm.positionId" />
+            </el-select>
+            <router-link v-if="!positions.length" to="/system/categories" @click="workerEditDialog = false">
+              新增職位分類字典
+            </router-link>
           </el-form-item>
           <el-form-item label="日薪（HK$）" required>
             <el-input-number v-model="workerForm.dailyWage" :precision="2" :step="50" :min="0" :max="999999.99"
@@ -1055,6 +1196,7 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
 .worker-toolbar-hint { font-size: 12px; color: var(--el-text-color-secondary); }
 .worker-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; }
 .worker-form-row :deep(.el-input-number) { width: 100%; }
+.worker-form-row :deep(.el-select) { width: 100%; }
 .option-note { margin-left: 16px; font-size: 12px; color: var(--el-text-color-secondary); }
 .card-editable { display: inline-block; min-width: 44px; padding: 1px 4px; border-radius: 4px; cursor: pointer; }
 .card-editable:hover { background: var(--el-fill-color-light); box-shadow: inset 0 0 0 1px var(--el-border-color); }
@@ -1064,9 +1206,12 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
 .filters { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; padding: 0 0 16px; }
 .filter-field { display: flex; flex-direction: column; gap: 8px; width: 220px; max-width: 100%; }
 .filter-field label { color: var(--mc-text-secondary); font-size: 13px; }
+.filter-hint { font-size: 12px; line-height: 1.5; color: var(--el-text-color-secondary); }
 .filter-field :deep(.el-date-editor) { width: 100%; }
 .filter-field :deep(.el-select) { width: 100%; }
 .table-region { min-width: 0; background: var(--mc-card-bg, var(--el-bg-color)); border-top: 1px solid var(--el-border-color); }
+.table-region :deep(.el-table__footer-wrapper td) { background: var(--el-fill-color-light); }
+.table-region :deep(.el-table__footer-wrapper .cell) { font-weight: 500; font-variant-numeric: tabular-nums; }
 .num { font-variant-numeric: tabular-nums; }
 .pagination { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 16px 0; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; }
