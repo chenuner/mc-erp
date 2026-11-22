@@ -30,8 +30,6 @@ namespace MC.Erp.Migrations
             ALTER TABLE accounting_receipts DROP CONSTRAINT IF EXISTS "FK_accounting_receipts_sys_dict_DocumentTypeDictId";
             ALTER TABLE accounting_receipts DROP CONSTRAINT IF EXISTS "FK_accounting_receipts_sys_dict_SiteCategoryDictId";
             ALTER TABLE accounting_receipts DROP CONSTRAINT IF EXISTS "FK_accounting_receipts_sys_dict_Type";
-            ALTER TABLE hangfire.state DROP CONSTRAINT IF EXISTS "state_jobid_fkey";
-            ALTER TABLE hangfire.jobparameter DROP CONSTRAINT IF EXISTS "jobparameter_jobid_fkey";
             """);
 
         /// <inheritdoc />
@@ -64,10 +62,6 @@ namespace MC.Erp.Migrations
                 FOREIGN KEY ("SiteCategoryDictId") REFERENCES sys_dict ("Id") ON DELETE RESTRICT;
             ALTER TABLE accounting_receipts ADD CONSTRAINT "FK_accounting_receipts_sys_dict_Type"
                 FOREIGN KEY ("Type") REFERENCES sys_dict ("Id") ON DELETE RESTRICT;
-            ALTER TABLE hangfire.state ADD CONSTRAINT "state_jobid_fkey"
-                FOREIGN KEY (jobid) REFERENCES hangfire.job (id) ON UPDATE CASCADE ON DELETE CASCADE;
-            ALTER TABLE hangfire.jobparameter ADD CONSTRAINT "jobparameter_jobid_fkey"
-                FOREIGN KEY (jobid) REFERENCES hangfire.job (id) ON UPDATE CASCADE ON DELETE CASCADE;
             """);
     }
 }
