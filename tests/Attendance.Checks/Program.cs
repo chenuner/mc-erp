@@ -188,6 +188,13 @@ Check(summary is { PunchCount: 1, NeedsReview: true }, "Summary counts rows and 
 Check(AttendanceCardScanSummaryDto.From(new AttendanceCardScan { Punches = [new AttendanceCardPunch { Day = 3 }] }).PunchCount == 0,
     "A day with every time cleared is not counted as a punch day");
 
+// 列表要靠核對時間分「待核對」和「已核對」；同步也以這個時間為前提
+var confirmedAt = new DateTime(2026, 11, 22, 9, 30, 0, DateTimeKind.Utc);
+Check(AttendanceCardScanSummaryDto.From(new AttendanceCardScan { ConfirmedAt = confirmedAt }).ConfirmedAt == confirmedAt,
+    "The summary carries the confirmation time so the list can tell 待核對 from 已核對");
+Check(AttendanceCardScanSummaryDto.From(new AttendanceCardScan()).ConfirmedAt is null,
+    "A freshly scanned card has no confirmation time until it is marked checked");
+
 // 人工修正：只覆寫改動的欄位，改過的記人工確認，沒改的保留原識別置信度
 var corrected = new AttendanceCardScan
 {
@@ -243,6 +250,13 @@ corrected.ReviewFields = [];
 Check(corrected.ReviewFields.Count == 0 && corrected.Punches[1].AmIn == confirmedBefore,
     "Confirming clears the card flags without touching the punch times");
 
+// 保存沒有改動時不算改動，已核對的卡不會被白白要求重新核對；真的改了就要重新核對
+Check(!new UpdateCardScanRequest(2026, 10, null, []).ApplyTo(corrected),
+    "Saving without changes keeps an existing confirmation valid");
+Check(new UpdateCardScanRequest(2026, 10, null,
+        [new UpdateCardPunch(6, "08:05", null, null, null, null, null)]).ApplyTo(corrected),
+    "Changing a time invalidates the confirmation so it has to be checked again");
+
 var badTime = false;
 try
 {
@@ -254,7 +268,7 @@ Check(badTime, "A time that is not HH:mm is rejected instead of silently dropped
 
 // --- 考勤卡 → 打卡明細 ---
 var workerId = Guid.NewGuid();
-var siteId = Guid.NewGuid();
+var siteDictId = Guid.NewGuid();
 var worked = new AttendanceCardPunch
 {
     Day = 5, AmIn = new TimeOnly(9, 7), AmOut = new TimeOnly(12, 0),
@@ -264,7 +278,7 @@ var worked = new AttendanceCardPunch
 Check(AttendanceRules.HasTime(worked), "A day with any punched time counts as worked");
 Check(!AttendanceRules.HasTime(new AttendanceCardPunch { Day = 5 }), "A rest day with no time at all is not a work day");
 
-var cardRecord = AttendanceRules.ToRecord(2026, 10, worked, workerId, siteId);
+var cardRecord = AttendanceRules.ToRecord(2026, 10, worked, workerId, siteDictId);
 Check(cardRecord.ClockInTime == new DateTime(2026, 10, 5, 1, 7, 0, DateTimeKind.Utc),
     "09:07 on the card (Hong Kong) is stored as 01:07 UTC");
 Check(cardRecord.ClockOutTime == new DateTime(2026, 10, 5, 9, 5, 0, DateTimeKind.Utc),
@@ -272,10 +286,10 @@ Check(cardRecord.ClockOutTime == new DateTime(2026, 10, 5, 9, 5, 0, DateTimeKind
 Check(cardRecord.OvertimeHours == 2.5m, "Overtime is the gap between the overtime punches");
 Check(cardRecord is { IsLaborLeave: false, Remark: AttendanceRules.ImportedRemark },
     "Imported rows are marked as card imports and are never labour leave");
-Check(cardRecord.WorkerId == workerId && cardRecord.SiteId == siteId, "Imported rows are linked to the chosen worker and site");
+Check(cardRecord.WorkerId == workerId && cardRecord.SiteDictId == siteDictId, "Imported rows are linked to the chosen worker and site");
 
 var midnightRecord = AttendanceRules.ToRecord(2026, 10,
-    new AttendanceCardPunch { Day = 31, AmIn = new TimeOnly(22, 0), AmOut = new TimeOnly(1, 30) }, workerId, siteId);
+    new AttendanceCardPunch { Day = 31, AmIn = new TimeOnly(22, 0), AmOut = new TimeOnly(1, 30) }, workerId, siteDictId);
 Check(midnightRecord.ClockOutTime == midnightRecord.ClockInTime.AddHours(3).AddMinutes(30),
     "An out time earlier than the in time is treated as after midnight");
 Check(AttendanceRules.OvertimeHoursOf(new AttendanceCardPunch { OtIn = new TimeOnly(22, 0), OtOut = new TimeOnly(1, 0) }) == 3m,

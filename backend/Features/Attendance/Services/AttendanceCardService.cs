@@ -5,6 +5,7 @@ using MC.Erp.Common.Infrastructure.Ocr;
 using MC.Erp.Data;
 using MC.Erp.Features.Attendance.Entities;
 using MC.Erp.Features.Storage.Services;
+using MC.Erp.Features.System.Entities;
 using MC.Erp.Features.System.Services;
 using Microsoft.EntityFrameworkCore;
 
@@ -12,20 +13,20 @@ namespace MC.Erp.Features.Attendance.Services;
 
 /// <summary>列表用的掃描摘要。</summary>
 public sealed record AttendanceCardScanSummaryDto(Guid Id, int? Year, int? Month, string? Name, int PunchCount,
-    bool NeedsReview, DateTime CreatedAt)
+    bool NeedsReview, DateTime? ConfirmedAt, DateTime CreatedAt)
 {
     // 打卡天數只算有時間的列，人工清空的列不算
     public static AttendanceCardScanSummaryDto From(AttendanceCardScan scan) => new(scan.Id, scan.Year, scan.Month,
         scan.Name, scan.Punches.Count(AttendanceRules.HasTime), AttendanceCardScanDto.CardOf(scan).NeedsReview,
-        scan.CreatedAt);
+        scan.ConfirmedAt, scan.CreatedAt);
 }
 
 /// <summary>一次掃描的完整結果；<see cref="Card"/> 的形狀與識別輸出一致，每欄帶置信度。</summary>
 public sealed record AttendanceCardScanDto(Guid Id, Guid? FileItemId, string? FileName, AttendanceCard Card,
-    DateTime CreatedAt)
+    DateTime? ConfirmedAt, DateTime CreatedAt)
 {
     public static AttendanceCardScanDto From(AttendanceCardScan scan) => new(scan.Id, scan.FileItemId,
-        scan.FileItem?.OriginalName, CardOf(scan), scan.CreatedAt);
+        scan.FileItem?.OriginalName, CardOf(scan), scan.ConfirmedAt, scan.CreatedAt);
 
     /// <summary>
     /// 由資料表還原掃描結果。卡級複核標記用存下來的那份（保住推不回來的 layout），
@@ -84,43 +85,65 @@ public sealed record UpdateCardScanRequest(
     /// 沒改的保留原本識別置信度——所以核對過的低置信度欄位才會從「需覆核」消失。
     /// <paramref name="IncludeHandwritten"/> 為 true 時（標記為已核對並一併檢查手寫欄位），
     /// 年份 / 月份 / 姓名也一起重新判定，使用者可以一次把整張卡核對完。
+    /// 回傳這次是否真的改了內容（呼叫端據此判斷原本的核對是否已失效）。
     /// </summary>
-    public void ApplyTo(AttendanceCardScan scan)
+    public bool ApplyTo(AttendanceCardScan scan)
     {
+        var changed = false;
         if (Year != scan.Year)
         {
             scan.Year = Year;
             scan.YearConfidence = Confidence(Year);
+            changed = true;
         }
         if (Month != scan.Month)
         {
             scan.Month = Month;
             scan.MonthConfidence = Confidence(Month);
+            changed = true;
         }
         var name = string.IsNullOrWhiteSpace(Name) ? null : Name.Trim();
         if (name != scan.Name)
         {
             scan.Name = name;
             scan.NameConfidence = Confidence(name);
+            changed = true;
         }
-        foreach (var edit in Records) Apply(scan, edit);
+        foreach (var edit in Records) changed |= Apply(scan, edit);
         scan.ReviewFields = CardReviewRules.ReviewFieldsOf(scan, IncludeHandwritten);
+        return changed;
     }
 
-    private static void Apply(AttendanceCardScan scan, UpdateCardPunch edit)
+    private static bool Apply(AttendanceCardScan scan, UpdateCardPunch edit)
     {
         var punch = scan.Punches.FirstOrDefault(item => item.Day == edit.Day);
+        // 這一天原本不在卡上：新增一列，內容寫入與否都算改動
+        var changed = punch is null;
         if (punch is null)
         {
             punch = new AttendanceCardPunch { Day = edit.Day };
             scan.Punches.Add(punch);
         }
-        (punch.AmIn, punch.AmInConfidence) = Set(edit.AmIn, punch.AmIn, punch.AmInConfidence);
-        (punch.AmOut, punch.AmOutConfidence) = Set(edit.AmOut, punch.AmOut, punch.AmOutConfidence);
-        (punch.PmIn, punch.PmInConfidence) = Set(edit.PmIn, punch.PmIn, punch.PmInConfidence);
-        (punch.PmOut, punch.PmOutConfidence) = Set(edit.PmOut, punch.PmOut, punch.PmOutConfidence);
-        (punch.OtIn, punch.OtInConfidence) = Set(edit.OtIn, punch.OtIn, punch.OtInConfidence);
-        (punch.OtOut, punch.OtOutConfidence) = Set(edit.OtOut, punch.OtOut, punch.OtOutConfidence);
+
+        var value = Set(edit.AmIn, punch.AmIn, punch.AmInConfidence);
+        changed |= value != (punch.AmIn, punch.AmInConfidence);
+        (punch.AmIn, punch.AmInConfidence) = value;
+        value = Set(edit.AmOut, punch.AmOut, punch.AmOutConfidence);
+        changed |= value != (punch.AmOut, punch.AmOutConfidence);
+        (punch.AmOut, punch.AmOutConfidence) = value;
+        value = Set(edit.PmIn, punch.PmIn, punch.PmInConfidence);
+        changed |= value != (punch.PmIn, punch.PmInConfidence);
+        (punch.PmIn, punch.PmInConfidence) = value;
+        value = Set(edit.PmOut, punch.PmOut, punch.PmOutConfidence);
+        changed |= value != (punch.PmOut, punch.PmOutConfidence);
+        (punch.PmOut, punch.PmOutConfidence) = value;
+        value = Set(edit.OtIn, punch.OtIn, punch.OtInConfidence);
+        changed |= value != (punch.OtIn, punch.OtInConfidence);
+        (punch.OtIn, punch.OtInConfidence) = value;
+        value = Set(edit.OtOut, punch.OtOut, punch.OtOutConfidence);
+        changed |= value != (punch.OtOut, punch.OtOutConfidence);
+        (punch.OtOut, punch.OtOutConfidence) = value;
+        return changed;
     }
 
     /// <summary>沒改就保留原識別置信度；改了就記人工確認，清空則連置信度一併清掉。</summary>
@@ -151,9 +174,9 @@ public sealed record UpdateCardPunch(
     string? OtOut);
 
 /// <summary>
-/// 把整張卡標記為已核對（人工對照原卡看過）：清掉卡片層複核標記，並把每列時間欄的置信度記成人工確認，
-/// 所以日期欄的紅字也一併放行，狀態由「需覆核」變「已識別」。時間值本身不改。
-/// IncludeHandwritten 為 true 時連手寫的年月姓名一併判定，留着低置信度就仍然需覆核。
+/// 把整張卡標記為已核對（人工對照原卡看過）：清掉卡片層複核標記、記下核對時間，並把每列時間欄的置信度記成人工確認，
+/// 所以日期欄的紅字也一併放行，狀態由「需覆核」變「已核對」。時間值本身不改。
+/// IncludeHandwritten 為 true 時連手寫的年月姓名一併判定，留着低置信度就仍然需覆核、核對時間不會寫入。
 /// </summary>
 public sealed record ConfirmCardScanRequest(bool IncludeHandwritten = false);
 
@@ -181,18 +204,18 @@ public static class CardReviewRules
         value is null || confidence is not { } score || score < AzureDocumentOcrService.ConfidenceThreshold;
 }
 
-/// <summary>同步到打卡明細的目標：哪個員工、哪個地盤（卡上只有手寫姓名，由使用者自己配對）。</summary>
-public sealed record SyncCardRequest(Guid WorkerId, Guid SiteId);
+/// <summary>同步到打卡明細的目標：哪個員工、哪個地盤（地盤是系統字典 AccountingSiteCategory 的字典項；卡上只有手寫姓名，由使用者自己配對）。</summary>
+public sealed record SyncCardRequest(Guid WorkerId, Guid SiteDictId);
 
 /// <summary>同步結果：今次寫入幾筆打卡明細，以及重算後的薪酬表內容。</summary>
 public sealed record CardSyncResultDto(Guid ScanId, int Year, int Month, Guid WorkerId, string WorkerName,
-    Guid SiteId, string SiteName, int AddedRecords, decimal WorkDays, decimal LaborLeaveDays,
+    Guid SiteDictId, string SiteName, int AddedRecords, decimal WorkDays, decimal LaborLeaveDays,
     decimal TotalWorkDays, decimal OvertimeHours, decimal DailyWage, decimal OvertimeAmount,
     decimal MpfEmployer, decimal MpfEmployee, decimal ActualPay, decimal TotalAmount)
 {
-    public static CardSyncResultDto From(AttendanceCardScan scan, Worker worker, Site site, int added,
+    public static CardSyncResultDto From(AttendanceCardScan scan, Worker worker, SysDict site, int added,
         MonthlyWorkSummary summary) => new(scan.Id, summary.Year, summary.Month, worker.Id, worker.Name, site.Id,
-        site.Name, added, summary.WorkDays, summary.LaborLeaveDays, summary.TotalWorkDays, summary.OvertimeHours,
+        site.Label, added, summary.WorkDays, summary.LaborLeaveDays, summary.TotalWorkDays, summary.OvertimeHours,
         summary.DailyWage, summary.OvertimeAmount, summary.MpfEmployer, summary.MpfEmployee, summary.ActualPay,
         summary.TotalAmount);
 }
@@ -207,6 +230,8 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
     private const int MaxImageBytes = 4 * 1024 * 1024;
     private const string CardTypeGroup = "AttendanceCard";
     private const string CardTypeValue = "card";
+    /// <summary>地盤字典分組代碼；和會計票據共用同一份地盤名單（「系統字典 → 地盤分類」）。</summary>
+    private const string SiteGroup = "AccountingSiteCategory";
     private static readonly byte[] PngHeader = [137, 80, 78, 71, 13, 10, 26, 10];
 
     public bool OcrConfigured => ocr.IsConfigured;
@@ -255,7 +280,8 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
     /// <summary>
     /// 標記為已核對（人工已對照原卡確認整張卡）：卡片層複核標記清空，
     /// 而且每一列時間欄的置信度一併記成人工確認（1），所以日期欄的紅字也一併放行——
-    /// 狀態由「需覆核」變「已識別」。時間本身的值完全不動。
+    /// 狀態由「需覆核」變「已核對」，並記下 <see cref="AttendanceCardScan.ConfirmedAt"/>。
+    /// 時間本身的值完全不動。同步的前提就是這個時間。
     /// <paramref name="IncludeHandwritten"/> 為 true 時仍會檢查手寫的年月姓名，低置信度的照樣保留需覆核。
     /// </summary>
     public async Task<AttendanceCardScanDto> ConfirmAsync(Guid id, ConfirmCardScanRequest request,
@@ -270,6 +296,8 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
             ? CardReviewRules.ReviewFieldsOf(scan, includeHandwritten: true)
             : [];
         foreach (var punch in scan.Punches) ConfirmPunch(punch);
+        // 勾了手寫檢查而仍有欄位要覆核，就不算核對完成，同步會繼續被擋
+        scan.ConfirmedAt = AttendanceCardScanDto.CardOf(scan).NeedsReview ? null : DateTime.UtcNow;
         scan.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         return AttendanceCardScanDto.From(scan);
@@ -300,7 +328,8 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
             .Include(item => item.FileItem)
             .FirstOrDefaultAsync(item => item.Id == id, ct)
             ?? throw new KeyNotFoundException("考勤卡掃描記錄不存在");
-        request.ApplyTo(scan);
+        // 核對過的內容再改動，原本的核對就不算數：要重新按「標記為已核對」才能同步
+        if (request.ApplyTo(scan)) scan.ConfirmedAt = null;
         scan.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         return AttendanceCardScanDto.From(scan);
@@ -308,24 +337,33 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
 
     /// <summary>
     /// 把一張考勤卡導入打卡明細，並按該員工該月的全部打卡明細重算薪酬表。
+    /// 前提是卡片已「標記為已核對」且沒有需覆核欄位，否則拒絕——先核對，再同步。
     /// 同一員工同一月再同步＝重算：先刪掉上次由考勤卡導入的明細再寫入，所以改完時間重按不會重複計工數。
     /// </summary>
     public async Task<CardSyncResultDto> SyncAsync(Guid id, SyncCardRequest request, CancellationToken ct = default)
     {
-        if (request.WorkerId == Guid.Empty || request.SiteId == Guid.Empty)
+        if (request.WorkerId == Guid.Empty || request.SiteDictId == Guid.Empty)
             throw new InvalidOperationException("請選擇員工和地盤");
 
         var scan = await db.AttendanceCardScans.Include(item => item.Punches)
             .FirstOrDefaultAsync(item => item.Id == id, ct)
             ?? throw new KeyNotFoundException("考勤卡掃描記錄不存在");
+
+        // 流程硬性規定：先「標記為已核對」，再同步到打卡明細及薪酬表
+        if (AttendanceCardScanDto.CardOf(scan).NeedsReview)
+            throw new InvalidOperationException("這張考勤卡還有需覆核的欄位，請先按「標記為已核對」再同步");
+        if (scan.ConfirmedAt is null)
+            throw new InvalidOperationException("這張考勤卡還沒標記為已核對，請先按「標記為已核對」再同步");
+
         if (scan.Year is not { } year || scan.Month is not { } month)
             throw new InvalidOperationException("這張考勤卡沒有年月，請先在識別結果裡補上再同步");
 
         var worker = await db.Workers.Include(item => item.Position)
             .FirstOrDefaultAsync(item => item.Id == request.WorkerId && !item.IsDeleted, ct)
             ?? throw new KeyNotFoundException("員工不存在");
-        var site = await db.Sites.FirstOrDefaultAsync(item => item.Id == request.SiteId && !item.IsDeleted, ct)
-            ?? throw new KeyNotFoundException("地盤不存在");
+        var site = await db.SysDicts.FirstOrDefaultAsync(item =>
+                item.Id == request.SiteDictId && item.GroupName == SiteGroup && item.Enabled, ct)
+            ?? throw new KeyNotFoundException("地盤不存在或已停用，請在「系統字典 → 地盤」維護");
 
         // 日薪是計薪基礎，0 元會算出負數的實付人工，先擋住讓使用者補
         if (worker.DailyWage <= 0)

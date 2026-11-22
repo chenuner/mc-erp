@@ -12,7 +12,7 @@ public sealed record PayrollTotals(decimal WorkDays, decimal LaborLeaveDays, dec
 /// <summary>打卡明細合計：打卡筆數及 O.T. 小時（明細本身不存工時，工時只在薪酬表按工數算）。</summary>
 public sealed record PunchTotals(int Records, decimal OvertimeHours);
 
-public sealed class AttendanceTableService(ErpDbContext db, IExternalAttendanceApi externalApi)
+public sealed class AttendanceTableService(ErpDbContext db)
 {
     /// <summary>薪酬表篩選條件；列表、筆數和合計共用同一份，口徑不會漂移。職位按當月快照篩。</summary>
     private IQueryable<MonthlyWorkSummary> PayrollQuery(int year, int month, Guid? workerId, Guid? positionId)
@@ -30,7 +30,7 @@ public sealed class AttendanceTableService(ErpDbContext db, IExternalAttendanceA
     {
         var (start, end) = AttendanceRules.MonthRange(year, month);
         var query = db.AttendanceRecords.AsNoTracking()
-            .Where(r => r.ClockInTime >= start && r.ClockInTime < end && !r.Worker.IsDeleted && !r.Site.IsDeleted);
+            .Where(r => r.ClockInTime >= start && r.ClockInTime < end && !r.Worker.IsDeleted);
         return workerId is { } selected && selected != Guid.Empty ? query.Where(r => r.WorkerId == selected) : query;
     }
 
@@ -75,54 +75,4 @@ public sealed class AttendanceTableService(ErpDbContext db, IExternalAttendanceA
         => db.AttendanceRecords.Include(r => r.Worker).Include(r => r.Site).FirstOrDefaultAsync(r => r.Id == id, ct);
 
     public Task SaveAsync(CancellationToken ct) => db.SaveChangesAsync(ct);
-
-    public async Task<int> InitializeMockAsync(int year, int month, CancellationToken ct)
-    {
-        var (start, end) = AttendanceRules.MonthRange(year, month);
-        var source = await externalApi.FetchRecordsAsync(start, end, ct);
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        var added = 0;
-        var index = 0;
-        var sites = await db.Sites.ToListAsync(ct);
-        foreach (var group in source.GroupBy(r => r.EmployeeId))
-        {
-            var sample = group.First();
-            var worker = await db.Workers.FirstOrDefaultAsync(w => w.EmployeeId == group.Key, ct);
-            worker ??= new Worker { EmployeeId = group.Key, Name = sample.WorkerName, DailyWage = 900m + index * 50m };
-            index++;
-            if (await db.MonthlyWorkSummaries.AnyAsync(s => s.WorkerId == worker.Id && s.Year == year && s.Month == month, ct))
-                continue;
-            if (db.Entry(worker).State == EntityState.Detached) db.Workers.Add(worker);
-            foreach (var item in group)
-            {
-                var site = sites.FirstOrDefault(s => s.Name == item.SiteName);
-                if (site is null)
-                {
-                    site = new Site { Name = item.SiteName ?? "模擬地盤" };
-                    sites.Add(site);
-                    db.Sites.Add(site);
-                }
-                db.AttendanceRecords.Add(new AttendanceRecord
-                {
-                    Worker = worker, Site = site, ClockInTime = item.ClockInTime,
-                    ClockOutTime = item.ClockOutTime, OvertimeHours = item.OvertimeHours,
-                    IsLaborLeave = item.IsLaborLeave, Remark = "模擬打卡"
-                });
-            }
-            db.MonthlyWorkSummaries.Add(new MonthlyWorkSummary
-            {
-                Worker = worker, Year = year, Month = month,
-                WorkDays = 24m, LaborLeaveDays = 1m, TotalWorkDays = 25m, OvertimeHours = 8m,
-                DailyWage = worker.DailyWage, OvertimeAmount = 1200m,
-                MpfEmployer = 1200m, MpfEmployee = 1200m,
-                ActualPay = 22500m + index * 100m, TotalAmount = 24900m + index * 100m,
-                Remark = "模擬薪酬，金額為樣例值，計薪規則待定"
-            });
-            added++;
-        }
-        await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
-        return added;
-    }
-
 }

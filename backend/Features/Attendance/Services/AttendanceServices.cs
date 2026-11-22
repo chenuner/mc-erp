@@ -81,16 +81,6 @@ public sealed class AttendanceServices(IAttendanceRepository repo, SysDictServic
         await repo.UpdateWorkerAsync(worker, ct);
     }
 
-    public Task<List<Site>> GetSitesAsync(CancellationToken ct = default)
-        => repo.GetAllSitesAsync(ct);
-
-    public async Task<Site> CreateSiteAsync(string name, string? address, CancellationToken ct = default)
-    {
-        var site = new Site { Name = name, Address = address };
-        await repo.AddSiteAsync(site, ct);
-        return site;
-    }
-
     public async Task<List<AttendanceRecord>> GetRecordsAsync(Guid workerId, DateTime start, DateTime end, CancellationToken ct = default)
         => await repo.GetRecordsAsync(workerId, start, end, ct);
 

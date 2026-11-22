@@ -21,9 +21,7 @@ public static class AttendanceEndpoints
         group.MapPut("/workers/{id:guid}", UpdateWorkerAsync).RequireAuthorization("admin");
         group.MapDelete("/workers/{id:guid}", DeleteWorkerAsync).RequireAuthorization("admin");
 
-        // 地盤
-        group.MapGet("/sites", ListSitesAsync).RequireAuthorization();
-        group.MapPost("/sites", CreateSiteAsync).RequireAuthorization("admin");
+        // 地盤：系統字典（AccountingSiteCategory）維護，不再有 /sites 端點
 
         // 打卡記錄
         group.MapGet("/records/{workerId:guid}", GetRecordsAsync).RequireAuthorization();
@@ -76,20 +74,6 @@ public static class AttendanceEndpoints
         return TypedResults.NoContent();
     }
 
-    // --- 地盤 ---
-    private static async Task<Ok<List<SiteDto>>> ListSitesAsync(AttendanceServices svc, CancellationToken ct)
-    {
-        var sites = await svc.GetSitesAsync(ct);
-        return TypedResults.Ok(sites.Select(SiteDto.From).ToList());
-    }
-
-    private static async Task<Created<SiteDto>> CreateSiteAsync(
-        CreateSiteRequest req, AttendanceServices svc, CancellationToken ct)
-    {
-        var site = await svc.CreateSiteAsync(req.Name, req.Address, ct);
-        return TypedResults.Created($"/api/attendance/sites/{site.Id}", SiteDto.From(site));
-    }
-
     // --- 打卡記錄 ---
     private static async Task<Ok<List<RecordDto>>> GetRecordsAsync(
         Guid workerId, DateTime? start, DateTime? end, AttendanceServices svc, CancellationToken ct)
@@ -135,7 +119,7 @@ public static class AttendanceEndpoints
         Guid id, UpdateCardScanRequest request, AttendanceCardService svc, CancellationToken ct)
         => TypedResults.Ok(await svc.UpdateAsync(id, request, ct));
 
-    /// <summary>人工核對完成：清掉卡片層的複核標記（時間欄不改），狀態由「需覆核」變「已識別」。</summary>
+    /// <summary>人工核對完成：清掉卡片層的複核標記並記下核對時間（時間欄不改），狀態由「需覆核」變「已核對」；這是同步的前提。</summary>
     private static async Task<Ok<AttendanceCardScanDto>> ConfirmCardScanAsync(
         Guid id, ConfirmCardScanRequest request, AttendanceCardService svc, CancellationToken ct)
         => TypedResults.Ok(await svc.ConfirmAsync(id, request, ct));
@@ -176,13 +160,9 @@ public sealed record WorkerDto(Guid Id, string Name, string? EmployeeId, decimal
     public static WorkerDto From(Worker w) => new(w.Id, w.Name, w.EmployeeId, w.DailyWage, w.IsActive,
         w.PositionDictId, w.Position?.Label);
 }
-public sealed record SiteDto(Guid Id, string Name, string? Address, bool IsActive)
+public sealed record RecordDto(Guid Id, Guid WorkerId, Guid SiteDictId, DateTime ClockInTime, DateTime? ClockOutTime, decimal OvertimeHours, bool IsLaborLeave, string? Remark)
 {
-    public static SiteDto From(Site s) => new(s.Id, s.Name, s.Address, s.IsActive);
-}
-public sealed record RecordDto(Guid Id, Guid WorkerId, Guid SiteId, DateTime ClockInTime, DateTime? ClockOutTime, decimal OvertimeHours, bool IsLaborLeave, string? Remark)
-{
-    public static RecordDto From(AttendanceRecord r) => new(r.Id, r.WorkerId, r.SiteId, r.ClockInTime, r.ClockOutTime, r.OvertimeHours, r.IsLaborLeave, r.Remark);
+    public static RecordDto From(AttendanceRecord r) => new(r.Id, r.WorkerId, r.SiteDictId, r.ClockInTime, r.ClockOutTime, r.OvertimeHours, r.IsLaborLeave, r.Remark);
 }
 public sealed record SummaryDto(Guid Id, Guid WorkerId, int Year, int Month, decimal WorkDays, decimal LaborLeaveDays, decimal TotalWorkDays, decimal OvertimeHours, decimal DailyWage, decimal OvertimeAmount, decimal MpfEmployer, decimal MpfEmployee, decimal ActualPay, decimal TotalAmount, string? Remark)
 {
@@ -194,6 +174,5 @@ public sealed record CreateWorkerRequest([Required, MaxLength(50)] string Name, 
 /// <summary>員工管理：只改有給的欄位（姓名、工號、日薪、在職、職位分類）；positionId 傳空 Guid 代表清空職位。</summary>
 public sealed record UpdateWorkerRequest([MaxLength(50)] string? Name, [MaxLength(50)] string? EmployeeId,
     [Range(typeof(decimal), "0", "999999.99")] decimal? DailyWage, bool? IsActive, Guid? PositionId = null);
-public sealed record CreateSiteRequest([Required] string Name, string? Address);
 /// <summary>考勤卡圖片連結；必須是 https，由 Azure 直接拉取。</summary>
 public sealed record ScanUrlRequest([Required] string Url);

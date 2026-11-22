@@ -176,6 +176,9 @@ namespace MC.Erp.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("ConfirmedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -247,7 +250,7 @@ namespace MC.Erp.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
-                    b.Property<Guid>("SiteId")
+                    b.Property<Guid>("SiteDictId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("WorkerId")
@@ -255,7 +258,7 @@ namespace MC.Erp.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("SiteId");
+                    b.HasIndex("SiteDictId");
 
                     b.HasIndex("WorkerId", "ClockInTime");
 
@@ -334,41 +337,6 @@ namespace MC.Erp.Migrations
                         .IsUnique();
 
                     b.ToTable("attendance_monthly_summaries", (string)null);
-                });
-
-            modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.Site", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Address")
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Name");
-
-                    b.ToTable("attendance_sites", (string)null);
                 });
 
             modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.Worker", b =>
@@ -773,10 +741,10 @@ namespace MC.Erp.Migrations
 
             modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.AttendanceRecord", b =>
                 {
-                    b.HasOne("MC.Erp.Features.Attendance.Entities.Site", "Site")
-                        .WithMany("Records")
-                        .HasForeignKey("SiteId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                    b.HasOne("MC.Erp.Features.System.Entities.SysDict", "Site")
+                        .WithMany()
+                        .HasForeignKey("SiteDictId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("MC.Erp.Features.Attendance.Entities.Worker", "Worker")
@@ -862,11 +830,6 @@ namespace MC.Erp.Migrations
             modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.AttendanceCardScan", b =>
                 {
                     b.Navigation("Punches");
-                });
-
-            modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.Site", b =>
-                {
-                    b.Navigation("Records");
                 });
 
             modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.Worker", b =>

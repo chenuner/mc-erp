@@ -2,17 +2,6 @@ import request from './request'
 import { listSysDictsByGroup, type PagedResult, type SysDictDto } from './system'
 import type { OcrField } from './accounting'
 
-export interface SiteDto {
-  id: string
-  name: string
-  address: string | null
-  isActive: boolean
-}
-
-export async function listSites(): Promise<SiteDto[]> {
-  return await request.get('/attendance/sites') as SiteDto[]
-}
-
 export interface WorkerDto {
   id: string
   name: string
@@ -32,6 +21,11 @@ export async function listWorkers(): Promise<WorkerDto[]> {
 /** 職位分類選項從系統字典 AttendancePosition 讀取，由用戶在「系統字典」自行維護。 */
 export async function listWorkerPositions(): Promise<SysDictDto[]> {
   return await listSysDictsByGroup('AttendancePosition')
+}
+
+/** 地盤選項和會計票據共用同一份系統字典（AccountingSiteCategory，「系統字典 → 地盤分類」）。 */
+export async function listAttendanceSites(): Promise<SysDictDto[]> {
+  return await listSysDictsByGroup('AccountingSiteCategory')
 }
 
 /** 卡上手寫姓名對不上任何員工時，直接用該姓名建一個工人；職位分類可選。 */
@@ -137,10 +131,6 @@ export async function updatePunch(id: string, payload: PunchFields): Promise<Pun
   return (await request.put(`/attendance/punches/${id}`, payload)) as PunchDto
 }
 
-export async function initializeAttendanceMock(year: number, month: number): Promise<{ added: number }> {
-  return (await request.post('/attendance/mock', null, { params: { year, month } })) as { added: number }
-}
-
 /** 考勤卡單日打卡；時間是 HH:mm，空白代表當日沒有該次打卡。 */
 export interface AttendanceRow {
   day: number
@@ -169,6 +159,8 @@ export interface AttendanceCardScanDto {
   fileItemId: string | null
   fileName: string | null
   card: AttendanceCard
+  /** 人工按「標記為已核對」的時間；null 表示還沒核對，同步會被後端拒絕。 */
+  confirmedAt: string | null
   createdAt: string
 }
 
@@ -179,6 +171,8 @@ export interface AttendanceCardScanSummaryDto {
   name: string | null
   punchCount: number
   needsReview: boolean
+  /** 三種狀態：需覆核（needsReview）、待核對（乾淨但沒標記）、已核對（confirmedAt 有值）。 */
+  confirmedAt: string | null
   createdAt: string
 }
 
@@ -229,7 +223,8 @@ export async function updateCardScan(id: string, payload: CardScanEdit): Promise
 }
 
 /**
- * 標記為已核對：清掉卡片層複核標記，狀態由「需覆核」變「已識別」，時間欄不改。
+ * 標記為已核對：清掉卡片層複核標記並記下核對時間，狀態由「需覆核」變「已核對」，時間欄不改。
+ * 這是同步的前提；核對後再修改識別結果，核對時間會被清空，要重新標記。
  * includeHandwritten 為 true 時連手寫的年月姓名一併判定（低置信度仍會保留需覆核）。
  */
 export async function confirmCardScan(id: string, includeHandwritten = false): Promise<AttendanceCardScanDto> {
@@ -247,7 +242,8 @@ export interface CardSyncResult {
   month: number
   workerId: string
   workerName: string
-  siteId: string
+  /** 地盤是系統字典 AccountingSiteCategory 的字典項 id。 */
+  siteDictId: string
   siteName: string
   addedRecords: number
   workDays: number
@@ -262,7 +258,7 @@ export interface CardSyncResult {
   totalAmount: number
 }
 
-/** 把識別結果導入打卡明細（員工、地盤由使用者選），並重算該員工該月的薪酬表。 */
-export async function syncCardScan(id: string, payload: { workerId: string; siteId: string }): Promise<CardSyncResult> {
+/** 把識別結果導入打卡明細（員工、地盤由使用者選），並重算該員工該月的薪酬表；前提是已標記為已核對。 */
+export async function syncCardScan(id: string, payload: { workerId: string; siteDictId: string }): Promise<CardSyncResult> {
   return (await request.post(`/attendance/scans/${id}/sync`, payload)) as CardSyncResult
 }

@@ -87,9 +87,9 @@ backend/
 │   │   ├── Entities/           # User / Role / Permission / UserRole / RolePermission
 │   │   └── Repositories/       # IUserRepository / IRoleRepository + 實現
 │   ├── Attendance/
-│   │   ├── Endpoints/          # 工數查詢 / 月結報表 / 打卡表 / 考勤卡掃描 / mock
-│   │   ├── Services/           # AttendanceServices / AttendanceTableService / AttendanceCardService / 外部 API
-│   │   ├── Entities/           # AttendanceRecord / MonthlyWorkSummary / Worker / Site / AttendanceCardScan / AttendanceCardPunch
+│   │   ├── Endpoints/          # 工數查詢 / 月結報表 / 打卡表 / 考勤卡掃描
+│   │   ├── Services/           # AttendanceServices / AttendanceTableService / AttendanceCardService
+│   │   ├── Entities/           # AttendanceRecord / MonthlyWorkSummary / Worker / AttendanceCardScan / AttendanceCardPunch（地盤用系統字典 AccountingSiteCategory，沒有獨立實體）
 │   │   └── Repositories/       # IAttendanceRepository + 實現
 │   ├── Accounting/
 │   │   ├── Endpoints/          # 收據上傳 / 識別 / 保存 / 匯出
@@ -179,7 +179,8 @@ User ─┬─ UserRole ── Role ── RolePermission ── Permission
 
 - 現階段按月提供員工薪酬表和打卡明細；管理員可編輯並保存，注意事項最多 255 字元。金額使用 `decimal(18,2)`，工數和小時使用 `decimal(8,2)`。姓名篩選是員工下拉，查詢按 `workerId` 過濾（重名不會混在一起）；不填就是全部。薪酬表另可按職位分類篩選，條件是當月薪酬記錄的職位快照（`PositionDictId`）。
 - 員工（工人）資料存在 `attendance_workers`：姓名、工號（外部系統）、職位分類（可選）、日薪、在職。職位分類引用 `AttendancePosition` 字典，選項在「系統字典 → 職位分類」維護；SeedData 只預置「樓面員工」，不主動回填現有員工。入口在考勤薪酬頁的「員工管理」（僅 Admin），可新增、編輯（姓名 / 工號 / 職位分類 / 日薪 / 在職）、停用、刪除。停用（`IsActive=false`）只是不出現在同步的員工下拉，薪酬查詢照舊看得到；刪除是軟刪除（`IsDeleted`），薪酬表和打卡明細都不再顯示但記錄仍在庫裡——兩者是分開的動作，不要用停用代替刪除。日薪是計薪基礎，考勤卡同步時日薪為 0 會被拒絕（否則實付人工會是負數）。不把員工放進 `sys_dict`：字典只有字串欄位，裝不下日薪，也撐不住打卡明細和薪酬表的外鍵。
-- 真實打卡機未對接：管理員通過 `/api/attendance/mock?year=...&month=...` 手動初始化模擬數據（所有環境可用），重複初始化不覆蓋已有月結和打卡修正。
+- 真實打卡機未對接，也沒有模擬數據初始化入口：打卡明細只能由考勤卡同步（見下一節）或人工維護產生。
+- 地盤是系統字典 `AccountingSiteCategory`（「系統字典 → 地盤分類」維護），**沒有獨立的地盤表**，也沒有 `/attendance/sites` 端點；`AttendanceRecord.SiteDictId` 引用字典項。考勤和會計票據共用這一份名單：同一批地盤既用於打卡明細，也用於票據的地盤歸屬和 ZIP 導出目錄，不再各維護一份。停用（`Enabled=false`）只是不出現在同步的地盤下拉，已導入的打卡明細和歷史票據照舊顯示；刪除會因明細或票據引用而被拒絕。SeedData 不預置任何地盤，選項由用戶自己維護。
 - 打卡時間入庫使用 UTC，查詢月份及前端展示按香港時區（UTC+8）。薪酬不再只是樣例值：由考勤卡同步時按打卡明細重算（見下一節），但仍沒有定時同步，一律手工觸發。
 - 通過 `IHttpClientFactory` 調用外部考勤接口
 - CancellationToken 在 Infrastructure 層統一處理
@@ -197,16 +198,17 @@ User ─┬─ UserRole ── Role ── RolePermission ── Permission
 - 打卡鐘印的是「日號 + 時間」（`0509:07` = 05 日 09:07），時間一律正規化為 HH:mm；同一格出現兩個時間（`09:07 17:05`）代表它橫跨上班 / 下班兩欄，按順序拆開；小計欄及之後的欄位忽略。
 - 只有 1–31 的日號才算日期，表頭、標題、頁腳合計（231 / 307）不會被當成日期；表頭「日期」漏檢時退回按閱讀順序填欄，並把整張卡標記為 `layout` 需複核。休息日（只有日號、沒有時間）保留空列，方便前端對齊日期。
 - 置信度閾值 0.80：印刷紅字時間逐欄標記；手寫的年份、月份、姓名**不參與卡片層複核**（它們的置信度普遍在 0.6–0.75，用印刷體的閾值去卡會讓每張卡一直掛「需覆核」），置信度照樣回報並在前端提示「手寫欄位置信度偏低」。需要嚴格把關時可勾「一併檢查手寫欄位」（`PUT /scans/{id}` 與 `POST /scans/{id}/confirm` 都接受 `includeHandwritten`）。手寫數字不得當作已核對。
-- 人工核對完成後可按「標記為已核對」（`POST /api/attendance/scans/{id}/confirm`）：清掉卡片層複核標記，狀態由「需覆核」變「已識別」，時間欄完全不動。這是讓 `layout` 這類推不回來的標記由人工放行的唯一途徑；時間欄本身的低置信度只影響明細顯示，不影響卡片狀態。
+- 人工核對完成後可按「標記為已核對」（`POST /api/attendance/scans/{id}/confirm`）：清掉卡片層複核標記，時間欄的置信度記成人工確認，狀態由「需覆核」變「已核對」，並記下 `ConfirmedAt`，時間本身完全不動。這是讓 `layout` 這類推不回來的標記由人工放行的唯一途徑；時間欄本身的低置信度只影響明細顯示，不影響卡片狀態。
+- 流程是兩步，順序由後端把關：先「標記為已核對」，再「同步」。識別結果再經 `PUT` 真的改動過（年月、姓名或任何時間）就會清空 `ConfirmedAt`，要重新核對。即使識別結果本來就沒有紅字（狀態是「待核對」而不是「已核對」），也必須按過一次「標記為已核對」才可同步。
 - `prebuilt-layout` 對紅色印刷的打卡時間較穩（等寬、印刷體）；對手寫（月份、底部合計）識別率低，不能保證準確。若手寫長期不準，可評估改用 GPT-4o 視覺模型直出 JSON 作備選方案，但須先更新 `specs/tech-stack.md` 並確認費用，不得擅自引入。
-- 同步（`POST /api/attendance/scans/{id}/sync`，僅 Admin，body 指定員工和地盤——卡上只有手寫姓名，配對由使用者決定；前端把這一區放在識別結果對話框上方）：有打卡時間的日子各生成一筆打卡明細（上班＝上午上班，缺則用下午上班；下班＝下午下班，缺則用上午下班；卡上是香港時間，存庫用 UTC，凌晨下班自動跨日；加班時數存 `OvertimeHours`，備註記「考勤卡導入」），再按該員工該月**全部**打卡明細重算薪酬表。同一員工同一月再同步＝重算：先刪掉上次由考勤卡導入的明細再寫入，改完時間重按不會重複計工數，模擬數據和人工維護的明細不受影響。沒有年月、日號超出該月天數、員工日薪為 0（會算出負數實付人工）一律拒絕同步。薪酬表的工數、O.T.、MPF、實付、總數每次同步都會被覆蓋，Remark 保留；人工單獨改過這些欄位後，下次同步會蓋回去。薪酬表會一併記錄同步當下的職位分類快照（`PositionDictId` + `Position` 標籤），之後改員工職位不影響已生成的月份；重算時快照會跟着更新。
+- 同步（`POST /api/attendance/scans/{id}/sync`，僅 Admin，body 指定員工和地盤（`workerId` + `siteDictId`，地盤是系統字典 `AccountingSiteCategory` 的字典項）——卡上只有手寫姓名，配對由使用者決定）：**前提是卡片已標記為已核對（`ConfirmedAt` 有值）且沒有需覆核的欄位，否則回 400**；前端只在第 1 步完成後才顯示同步區。有打卡時間的日子各生成一筆打卡明細（上班＝上午上班，缺則用下午上班；下班＝下午下班，缺則用上午下班；卡上是香港時間，存庫用 UTC，凌晨下班自動跨日；加班時數存 `OvertimeHours`，備註記「考勤卡導入」），再按該員工該月**全部**打卡明細重算薪酬表。同一員工同一月再同步＝重算：先刪掉上次由考勤卡導入的明細再寫入，改完時間重按不會重複計工數，模擬數據和人工維護的明細不受影響。沒有年月、日號超出該月天數、員工日薪為 0（會算出負數實付人工）一律拒絕同步。薪酬表的工數、O.T.、MPF、實付、總數每次同步都會被覆蓋，Remark 保留；人工單獨改過這些欄位後，下次同步會蓋回去。薪酬表會一併記錄同步當下的職位分類快照（`PositionDictId` + `Position` 標籤），之後改員工職位不影響已生成的月份；重算時快照會跟着更新。
 - 計薪公式集中在 `AttendanceRules`（純函數，`Attendance.Checks` 直接驗證，不用資料庫）：工數 = 非勞工假的打卡明細數，目前一天一筆＝1 工，要改成半天 0.5 工或按工時折算只改 `WorkDaysOf`；總工數 = 工數 + 勞工假（勞工假不在考勤卡上，沿用薪酬表已填的值，不會被清零）；O.T. 時薪 = 日薪 ÷ 8 × 1.5，OT 金額 = O.T. 小時 × 時薪；MPF（僱主、僱員）= 總工數 × 50，兩邊同額；實付人工 = 日薪 × 總工數 − MPF（僱員）+ OT 金額；總數 = MPF（僱主）+ MPF（僱員）+ 實付人工。日薪取 `Worker.DailyWage`，所有金額四捨五入到 2 位。
 
 ### OCR 識別（會計收據）
 
 - 票據可直接手動錄入（不必先有原圖），原圖可稍後補上或更換。前端只有一個「保存」動作，保存後即完成，沒有草稿狀態；必填為票據類型、支出分類（不能是 pending）及地盤分類，日期、金額、幣種可留空。OCR 只在使用者按「OCR 識別」時執行，回傳建議欄位，由使用者決定是否填入（只填空白欄位），不直接改寫票據資料。
 - `IOcrService` 位於 Common/Infrastructure/Ocr，使用官方 C# SDK `Azure.AI.DocumentIntelligence`；客戶端由 `DocumentIntelligenceClientProvider` 共用（考勤卡掃描用同一個 client）；憑據只從環境變量 `AZURE_DOC_ENDPOINT` / `AZURE_DOC_KEY` 讀取，代碼和 appsettings 不出現密鑰；收據中文識別須實測，不能保證準確率。
-- `Receipt.SiteCategoryDictId` 引用 `AccountingSiteCategory` 字典，是票據唯一的地盤歸屬，同時決定導出 ZIP 的頂層目錄；不引用考勤 `Site`，會計與考勤的地盤各自獨立（考勤地盤只用於考勤模組）。
+- `Receipt.SiteCategoryDictId` 引用 `AccountingSiteCategory` 字典（顯示名「地盤分類」），是票據唯一的地盤歸屬，同時決定導出 ZIP 的頂層目錄；考勤的打卡明細也用同一份名單（`AttendanceRecord.SiteDictId`），**會計與考勤共用一個地盤分組**，不再各自維護。
 - `DocumentTypeDictId` 引用 `AccountingDocumentType`（receipt / invoice）。支出分類由 `Receipt.Type` 持有（`Accounting` 字典），沒有原圖也可保存；有原圖時同步寫入 `FileItem.Type`，供文件模組按分類展示。
 - 金額 decimal(18,2)，票據日期 DateOnly；發票金額取 InvoiceTotal，不取可能含歷史欠款的 AmountDue，也不自動視為已付款。
 - 有原圖後才可識別。使用 Azure Document Intelligence `prebuilt-receipt`（收據 / 現沽單）及 `prebuilt-invoice`（發票按發票類型錄入）；只映射票據表需要的欄位（商戶 / 供應商、日期、金額、幣種、票據號碼），每個欄位帶 Azure 回報的置信度（0–1）；未識別的日期、金額及幣種保持空值。

@@ -14,7 +14,6 @@ public static class AttendanceTableEndpoints
         group.MapGet("/punches", GetPunchesAsync).RequireAuthorization();
         group.MapPut("/payroll/{id:guid}", UpdatePayrollAsync).RequireAuthorization("admin");
         group.MapPut("/punches/{id:guid}", UpdatePunchAsync).RequireAuthorization("admin");
-        group.MapPost("/mock", InitializeMockAsync).RequireAuthorization("admin");
     }
 
     private static bool ValidQuery(int year, int month, int page, int pageSize)
@@ -99,23 +98,6 @@ public static class AttendanceTableEndpoints
         await svc.SaveAsync(ct);
         return TypedResults.Ok(PunchDto.From(row));
     }
-
-    private static async Task<Results<Ok<MockAttendanceDto>, NotFound, ValidationProblem, ProblemHttpResult>> InitializeMockAsync(
-        int year, int month, IWebHostEnvironment environment, AttendanceTableService svc, CancellationToken ct)
-    {
-        // 禁止这操作，必须要在所有环境下都启用
-        // if (!environment.IsDevelopment()) return TypedResults.NotFound();
-        if (!ValidQuery(year, month, 1, 20)) return InvalidQuery();
-        try
-        {
-            return TypedResults.Ok(new MockAttendanceDto(await svc.InitializeMockAsync(year, month, ct)));
-        }
-        catch (Microsoft.EntityFrameworkCore.DbUpdateException ex) when
-            (ex.InnerException is Npgsql.PostgresException { SqlState: "23505" })
-        {
-            return TypedResults.Problem("該月份正在初始化，請刷新後重試。", statusCode: StatusCodes.Status409Conflict);
-        }
-    }
 }
 
 /// <summary>員工薪酬表，金額單位為港元。職位分類是當月薪酬生成時的快照。</summary>
@@ -134,12 +116,9 @@ public sealed record PunchDto(Guid Id, Guid WorkerId, string Name, string? Emplo
     DateTimeOffset ClockInTime, DateTimeOffset? ClockOutTime, decimal OvertimeHours, bool IsLaborLeave, string? Remark)
 {
     public static PunchDto From(AttendanceRecord row) => new(row.Id, row.WorkerId, row.Worker.Name, row.Worker.EmployeeId,
-        row.Site.Name, new DateTimeOffset(row.ClockInTime, TimeSpan.Zero),
+        row.Site.Label, new DateTimeOffset(row.ClockInTime, TimeSpan.Zero),
         row.ClockOutTime is { } end ? new DateTimeOffset(end, TimeSpan.Zero) : null, row.OvertimeHours, row.IsLaborLeave, row.Remark);
 }
-
-/// <summary>本次新增的模擬員工月結數量。</summary>
-public sealed record MockAttendanceDto(int Added);
 
 /// <summary>人工維護薪酬欄位，不觸發自動計算。</summary>
 public sealed record UpdatePayrollRequest

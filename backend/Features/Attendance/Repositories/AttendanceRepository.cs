@@ -27,14 +27,7 @@ public sealed class AttendanceRepository(ErpDbContext db) : IAttendanceRepositor
     }
 
     // --- Site ---
-    public Task<List<Site>> GetAllSitesAsync(CancellationToken ct = default)
-        => db.Sites.Where(s => s.IsActive).OrderBy(s => s.Name).ToListAsync(ct);
-
-    public async Task AddSiteAsync(Site site, CancellationToken ct = default)
-    {
-        await db.Sites.AddAsync(site, ct);
-        await db.SaveChangesAsync(ct);
-    }
+    // 地盤是系統字典項（AccountingSiteCategory），查詢和維護都走 SysDict
 
     // --- AttendanceRecord ---
     public async Task<List<AttendanceRecord>> GetRecordsAsync(Guid workerId, DateTime start, DateTime end, CancellationToken ct = default)
