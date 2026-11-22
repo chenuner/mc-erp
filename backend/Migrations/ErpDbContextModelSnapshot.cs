@@ -299,6 +299,13 @@ namespace MC.Erp.Migrations
                         .HasPrecision(8, 2)
                         .HasColumnType("numeric(8,2)");
 
+                    b.Property<string>("Position")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid?>("PositionDictId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Remark")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
@@ -392,12 +399,17 @@ namespace MC.Erp.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("PositionDictId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
                     b.HasIndex("EmployeeId");
+
+                    b.HasIndex("PositionDictId");
 
                     b.ToTable("attendance_workers", (string)null);
                 });
@@ -787,6 +799,16 @@ namespace MC.Erp.Migrations
                         .IsRequired();
 
                     b.Navigation("Worker");
+                });
+
+            modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.Worker", b =>
+                {
+                    b.HasOne("MC.Erp.Features.System.Entities.SysDict", "Position")
+                        .WithMany()
+                        .HasForeignKey("PositionDictId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Position");
                 });
 
             modelBuilder.Entity("MC.Erp.Features.Identity.Entities.RolePermission", b =>

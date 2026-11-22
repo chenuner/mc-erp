@@ -51,6 +51,10 @@ public sealed class SysDictRepository(ErpDbContext db) : ISysDictRepository
                     || receipt.DocumentTypeDictId == dict.Id || receipt.SiteCategoryDictId == dict.Id, ct))
                 throw new InvalidOperationException("分類已被會計票據引用，請停用而不要刪除");
         }
+        // 薪酬表的職位是歷史快照（標籤已複製），刪字典不影響已生成的月份；只有現職員工引用時才阻止刪除
+        if (dict.GroupName == "AttendancePosition"
+            && await db.Workers.IgnoreQueryFilters().AnyAsync(worker => worker.PositionDictId == dict.Id, ct))
+            throw new InvalidOperationException("職位分類已被員工引用，請停用而不要刪除");
         dict.IsDeleted = true;
         dict.DeletedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);

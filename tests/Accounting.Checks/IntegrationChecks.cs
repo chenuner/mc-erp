@@ -214,6 +214,26 @@ internal static class IntegrationChecks
             Check(filtered.GetProperty("total").GetInt32() == 1, "document type filtering");
             filtered = await Get("accounting/receipts?start=2026-01-01&end=2026-12-31&pageSize=1");
             Check(filtered.GetProperty("total").GetInt32() == 3 && filtered.GetProperty("items").GetArrayLength() == 1, "list pagination and image-free receipt listed");
+            // 合計按整份篩選結果算，pageSize=1 時仍然是 3 張的合計
+            var totals = filtered.GetProperty("totals");
+            var allHkd = totals.GetProperty("amounts").EnumerateArray().Single();
+            Check(allHkd.GetProperty("currencyCode").GetString() == "HKD" && allHkd.GetProperty("count").GetInt32() == 3
+                && allHkd.GetProperty("amount").GetDecimal() == 330m && totals.GetProperty("missingAmount").GetInt32() == 0,
+                "totals cover the whole filtered result, not the current page");
+            // 換一種幣種後合計分幣種列出，HKD 和 USD 不會加在一起
+            using (var usd = await client.PutAsJsonAsync($"accounting/receipts/{manual.Id}",
+                new UpdateReceiptRequest(manual.Version, manual.DocumentTypeDictId, materialId, categoryB,
+                    new DateOnly(2026, 6, 1), 110m, "USD", "Supplier", "INV-1", null)))
+            {
+                Check(usd.StatusCode == HttpStatusCode.OK, "receipt currency changed");
+                manual = (await usd.Content.ReadFromJsonAsync<ReceiptResponse>())!;
+            }
+            var currencyTotals = (await Get("accounting/receipts?start=2026-01-01&end=2026-12-31"))
+                .GetProperty("totals").GetProperty("amounts").EnumerateArray().ToList();
+            Check(currencyTotals.Count == 2
+                && currencyTotals.Single(item => item.GetProperty("currencyCode").GetString() == "HKD").GetProperty("amount").GetDecimal() == 220m
+                && currencyTotals.Single(item => item.GetProperty("currencyCode").GetString() == "USD").GetProperty("amount").GetDecimal() == 110m,
+                "amount totals are kept per currency");
             await using (var zipStream = await client.GetStreamAsync("accounting/receipts/export?start=2026-01-01&end=2026-12-31"))
             using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Read))
             {
@@ -255,6 +275,10 @@ internal static class IntegrationChecks
                 doomed = (await sparse.Content.ReadFromJsonAsync<ReceiptResponse>())!;
                 Check(doomed.ReceiptDate == null && doomed.Amount == null && doomed.CurrencyCode == null, "optional fields stay empty");
             }
+            var sparseTotals = (await Get("accounting/receipts")).GetProperty("totals");
+            Check(sparseTotals.GetProperty("missingAmount").GetInt32() == 1
+                && sparseTotals.GetProperty("amounts").EnumerateArray().Sum(item => item.GetProperty("count").GetInt32()) == 3,
+                "receipts without an amount are counted but not summed");
             using (var confirmGone = await client.PostAsJsonAsync($"accounting/receipts/{doomed.Id}/confirm", new { doomed.Version }))
                 Check(confirmGone.StatusCode == HttpStatusCode.NotFound, "confirm endpoint removed");
             doomed = await Save(doomed, categoryA, new DateOnly(2026, 3, 1));

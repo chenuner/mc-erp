@@ -114,6 +114,11 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
             e.HasMany(w => w.Summaries)
                 .WithOne(s => s.Worker)
                 .HasForeignKey(s => s.WorkerId);
+            // 職位分類是系統字典項；資料庫不建外鍵，靠程式驗證（migration 會移除 EF 產生的 FK）
+            e.HasOne(w => w.Position)
+                .WithMany()
+                .HasForeignKey(w => w.PositionDictId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Site>(e =>
@@ -147,6 +152,7 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
             e.Property(s => s.MpfEmployee).HasPrecision(18, 2);
             e.Property(s => s.ActualPay).HasPrecision(18, 2);
             e.Property(s => s.TotalAmount).HasPrecision(18, 2);
+            e.Property(s => s.Position).HasMaxLength(100);
             e.Property(s => s.Remark).HasMaxLength(255);
             e.HasIndex(s => new { s.WorkerId, s.Year, s.Month }).IsUnique();
         });

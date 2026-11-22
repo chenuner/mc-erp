@@ -65,8 +65,21 @@ export async function accountingStatus(): Promise<{ ocrConfigured: boolean }> {
   return await request.get('/accounting/status') as { ocrConfigured: boolean }
 }
 
-export async function listReceipts(query: ReceiptQuery, page = 1, pageSize = 20): Promise<PagedResult<ReceiptDto>> {
-  return await request.get('/accounting/receipts', { params: { ...query, page, pageSize } }) as PagedResult<ReceiptDto>
+/** 單一幣種的金額合計；currencyCode 為 null 代表有金額但沒填幣種。 */
+export interface ReceiptCurrencyTotal {
+  currencyCode: string | null
+  count: number
+  amount: number
+}
+
+/** 整份篩選結果的金額合計；不同幣種分開，不混加。missingAmount 是未填金額的張數。 */
+export interface ReceiptTotals {
+  amounts: ReceiptCurrencyTotal[]
+  missingAmount: number
+}
+
+export async function listReceipts(query: ReceiptQuery, page = 1, pageSize = 20): Promise<PagedResult<ReceiptDto> & { totals: ReceiptTotals }> {
+  return await request.get('/accounting/receipts', { params: { ...query, page, pageSize } }) as PagedResult<ReceiptDto> & { totals: ReceiptTotals }
 }
 
 export async function getReceipt(id: string): Promise<ReceiptDto> {

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { ElLoading, ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import AppIcon from '@/components/AppIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import { listSysDictsByGroup, type SysDictDto } from '@/api/system'
 import { accountingStatus, listReceipts, getReceipt, createReceipt, attachReceiptImage, recognizeReceipt,
   updateReceipt, deleteReceipt, receiptImage, exportReceiptImages, downloadBlob, type ReceiptDto,
-  type ReceiptQuery, type UpdateReceipt, type OcrSuggestion } from '@/api/accounting'
+  type ReceiptQuery, type ReceiptTotals, type UpdateReceipt, type OcrSuggestion } from '@/api/accounting'
 
 const auth = useAuthStore()
 const isAdmin = computed(() => auth.roles.includes('Admin'))
@@ -16,6 +16,9 @@ const exporting = ref(false)
 const configured = ref(false)
 const rows = ref<ReceiptDto[]>([])
 const total = ref(0)
+/** 金額合計按整份篩選結果算，跟當前頁無關；後端回傳，不由前端對本頁加總。 */
+const receiptTotals = ref<ReceiptTotals | null>(null)
+const amountFormatter = new Intl.NumberFormat('zh-HK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const page = ref(1)
 const pageSize = ref(20)
 const documentTypes = ref<SysDictDto[]>([])
@@ -98,8 +101,21 @@ async function load(reset = false) {
     const result = await listReceipts(query(), page.value, pageSize.value)
     rows.value = result.items
     total.value = result.total
-  } catch { /* 已由攔截器提示 */ }
+    receiptTotals.value = result.totals
+  } catch { receiptTotals.value = null /* 已由攔截器提示 */ }
   finally { loading.value = false }
+}
+
+/** 合計行：金額按幣種分開列，另註未填金額張數；總數按篩選結果，不是本頁。 */
+function receiptSummary({ columns: tableColumns }: { columns: { property?: string }[] }): string[] {
+  const totals = receiptTotals.value
+  return tableColumns.map((column, index) => {
+    if (index === 0) return totals ? `合計（${total.value} 張）` : ''
+    if (column.property !== 'amount' || !totals) return ''
+    const parts = totals.amounts.map(item => `${item.currencyCode ?? '未填幣種'} ${amountFormatter.format(item.amount)}`)
+    if (totals.missingAmount) parts.push(`未填金額 ${totals.missingAmount} 張`)
+    return parts.join(' · ') || '—'
+  })
 }
 
 function fill(receipt: ReceiptDto) {
@@ -188,6 +204,8 @@ async function attachImage(file: File) {
 async function recognize() {
   if (!selected.value?.fileItemId) return
   busy.value = true
+  // 識別要等 Azure（可能幾十秒），用全螢幕遮罩讓使用者知道還在跑
+  const overlay = ElLoading.service({ fullscreen: true, lock: true, text: '票據識別中，請稍候…' })
   try {
     const { receipt, fields } = await recognizeReceipt(selected.value.id, form.documentTypeDictId)
     selected.value = receipt
@@ -207,7 +225,10 @@ async function recognize() {
     }
     await load()
   } catch { /* 已由攔截器提示，原圖仍保存 */ }
-  finally { busy.value = false }
+  finally {
+    overlay.close()
+    busy.value = false
+  }
 }
 
 const pendingTypeId = computed(() => types.value.find(dict => dict.value === 'pending')?.id)
@@ -345,11 +366,16 @@ async function openExport() {
 async function downloadArchive() {
   if (!await exportFormRef.value?.validate().catch(() => false)) return
   exporting.value = true
+  // ZIP 在後端逐張打包原圖，張數多時也要等，一樣用遮罩
+  const overlay = ElLoading.service({ fullscreen: true, lock: true, text: '正在打包原圖 ZIP，請稍候…' })
   try {
     downloadBlob(await exportReceiptImages(exportQuery()), 'accounting-images.zip')
     exportVisible.value = false
   } catch { /* 已由攔截器提示 */ }
-  finally { exporting.value = false }
+  finally {
+    overlay.close()
+    exporting.value = false
+  }
 }
 
 onMounted(async () => {
@@ -391,13 +417,14 @@ onBeforeUnmount(revokeImage)
     </el-form>
     <section class="results">
       <div class="result-heading"><span>{{ total }} 張票據</span><el-button text :disabled="busy" @click="load()"><AppIcon name="refresh-cw" :size="16" />刷新</el-button></div>
-      <el-table v-loading="loading" :data="rows" stripe max-height="600" empty-text="沒有符合條件的票據">
+      <el-table v-loading="loading" :data="rows" stripe max-height="600" empty-text="沒有符合條件的票據"
+        :show-summary="rows.length > 0" :summary-method="receiptSummary">
         <el-table-column prop="receiptDate" label="票據日期" width="120"><template #default="{ row }">{{ row.receiptDate || '未填寫' }}</template></el-table-column>
         <el-table-column prop="merchantName" label="商戶 / 供應商" min-width="160" show-overflow-tooltip />
         <el-table-column prop="siteCategoryLabel" label="地盤分類" min-width="145" show-overflow-tooltip />
         <el-table-column prop="documentTypeLabel" label="票據類型" width="100" />
         <el-table-column prop="typeLabel" label="支出分類" width="100" />
-        <el-table-column label="金額" width="160" align="right"><template #default="{ row }"><span class="number">{{ row.amount == null ? '未填寫' : `${row.currencyCode || '?'} ${row.amount.toLocaleString('zh-HK', { minimumFractionDigits: 2 })}` }}</span></template></el-table-column>
+        <el-table-column prop="amount" label="金額" width="190" align="right"><template #default="{ row }"><span class="number">{{ row.amount == null ? '未填寫' : `${row.currencyCode || '?'} ${row.amount.toLocaleString('zh-HK', { minimumFractionDigits: 2 })}` }}</span></template></el-table-column>
         <el-table-column label="原圖" width="110"><template #default="{ row }"><el-tag :type="!row.fileItemId ? 'info' : row.ocrStatus === 'Failed' ? 'danger' : row.ocrStatus === 'Succeeded' ? 'success' : 'warning'">{{ !row.fileItemId ? '無原圖' : statusNames[row.ocrStatus] || row.ocrStatus }}</el-tag></template></el-table-column>
         <el-table-column label="操作" width="130" fixed="right"><template #default="{ row }"><el-button link type="primary" :disabled="busy" @click="openDetail(row)">查看</el-button><el-button link type="danger" :disabled="busy" @click="removeReceipt(row)">刪除</el-button></template></el-table-column>
       </el-table>
@@ -500,6 +527,8 @@ onBeforeUnmount(revokeImage)
 .results { background: var(--el-bg-color); border-top: 1px solid var(--el-border-color); min-width: 0; }
 .result-heading { padding: 12px 16px; }
 .el-pagination { padding: 16px 0; justify-content: flex-end; flex-wrap: wrap; }
+.results :deep(.el-table__footer-wrapper td) { background: var(--el-fill-color-light); }
+.results :deep(.el-table__footer-wrapper .cell) { font-weight: 500; font-variant-numeric: tabular-nums; white-space: normal; line-height: 1.5; }
 .number, .md5 { font-variant-numeric: tabular-nums; }
 .file-input { display: none; }
 .detail-status { margin-bottom: 16px; }
