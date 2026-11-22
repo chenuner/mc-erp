@@ -2,6 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElLoading, ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import AppIcon from '@/components/AppIcon.vue'
+import ImageCropDialog from '@/components/ImageCropDialog.vue'
+import { MAX_UPLOAD_BYTES } from '@/utils/cropImage'
 import { useAuthStore } from '@/stores/auth'
 import { listSysDictsByGroup, type SysDictDto } from '@/api/system'
 import { accountingStatus, listReceipts, getReceipt, createReceipt, attachReceiptImage, recognizeReceipt,
@@ -44,6 +46,12 @@ const exportCount = ref<number | null>(null)
 const exportCountLoading = ref(false)
 const albumInput = ref<HTMLInputElement>()
 const cameraInput = ref<HTMLInputElement>()
+/** 待裁剪的原圖（剛選的檔案或已保存的原圖），交給 ImageCropDialog。 */
+const cropVisible = ref(false)
+const cropSource = ref<Blob | null>(null)
+const cropName = ref('receipt.jpg')
+/** 裁剪對象是否為已保存的原圖（用來提示更換原圖會清掉識別結果）。 */
+const cropReplacing = ref(false)
 const imageUrl = ref('')
 const imageLoading = ref(false)
 const ocrPanel = ref<string[]>([])
@@ -170,17 +178,37 @@ async function chooseFile(event: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
-  if (!['image/jpeg', 'image/png'].includes(file.type) || file.size > 4 * 1024 * 1024 || file.size === 0) {
-    ElMessage.warning('請選擇不超過 4 MB 的 JPEG / PNG 圖片')
+  if (!['image/jpeg', 'image/png'].includes(file.type) || file.size > 10 * MAX_UPLOAD_BYTES || file.size === 0) {
+    ElMessage.warning(`請選擇 JPEG / PNG 圖片（${10 * MAX_UPLOAD_BYTES / 1024 / 1024} MB 以內，裁剪後再上傳）`)
     return
   }
-  await attachImage(file)
+  // 先裁剪再上傳：手機照片常有桌面、手指和遠景，裁掉不影響識別
+  openCrop(file, file.name, false)
 }
 
-/** 選擇圖片後立即保存原圖；新票據會先建立，再附上原圖。不會自動識別。 */
-async function attachImage(file: File) {
+/** 打開裁剪對話框；已保存的原圖要先下載回來才能裁。 */
+function openCrop(source: Blob, name: string, replacing: boolean) {
+  cropSource.value = source
+  cropName.value = name
+  cropReplacing.value = replacing
+  cropVisible.value = true
+}
+
+async function recrop() {
+  const receipt = selected.value
+  if (!receipt?.fileItemId) return
+  busy.value = true
+  try {
+    openCrop(await receiptImage(receipt.id), receipt.fileName ?? 'receipt.jpg', true)
+  } catch { /* 已由攔截器提示 */ }
+  finally { busy.value = false }
+}
+
+/** 裁剪完成：把裁好的 JPEG 當作原圖保存（新票據先建立，再附上原圖），不自動識別。 */
+async function attachCropped(file: File) {
   if (!form.documentTypeDictId) { ElMessage.warning('請先選擇票據類型'); return }
   busy.value = true
+  let attached = false
   try {
     let receipt = selected.value
     if (!receipt) {
@@ -189,15 +217,19 @@ async function attachImage(file: File) {
       form.version = receipt.version
     }
     receipt = await attachReceiptImage(receipt.id, file)
-    selected.value = receipt
-    form.version = receipt.version
+    fill(receipt)
     revokeImage()
     imageUrl.value = URL.createObjectURL(file)
     imageLoading.value = false
-    ElMessage.success(configured.value ? '原圖已保存，可按「OCR 識別」讀取圖中資料' : '原圖已保存')
+    attached = true
+    ElMessage.success(configured.value
+      ? (cropReplacing.value ? '原圖已更換，可按「OCR 識別」重新讀取' : '原圖已保存，可按「OCR 識別」讀取圖中資料')
+      : '原圖已保存')
     await load()
   } catch { /* 已由攔截器提示 */ }
   finally { busy.value = false }
+  // 已保存的原圖裁完再更換：後端會清掉舊的識別結果，這裡同步清掉提示
+  if (attached && cropReplacing.value) { ocrPanel.value = []; ocrReview.value = [] }
 }
 
 /** 手動觸發 OCR：只回傳建議值，填入空白欄位，不覆蓋已輸入內容。 */
@@ -442,7 +474,7 @@ onBeforeUnmount(revokeImage)
             <div v-else class="image-upload">
               <AppIcon name="image" :size="32" />
               <p class="image-upload-title">尚未上傳原圖</p>
-              <p class="image-upload-hint">{{ configured ? '上傳後按「OCR 識別」讀取圖中資料，再由你核對。' : '先保存原圖；識別服務配置後可按「OCR 識別」讀取。' }}</p>
+              <p class="image-upload-hint">拍照或選圖後先裁剪，只保存框住的部分；{{ configured ? '上傳後按「OCR 識別」讀取圖中資料。' : '識別服務配置後可按「OCR 識別」讀取。' }}</p>
               <div class="actions">
                 <el-button :disabled="busy" @click="cameraInput?.click()"><AppIcon name="image" :size="16" />拍照</el-button>
                 <el-button :disabled="busy" @click="albumInput?.click()">選擇圖片</el-button>
@@ -450,6 +482,7 @@ onBeforeUnmount(revokeImage)
             </div>
             <div v-if="imageUrl" class="actions">
               <el-button text @click="downloadOriginal">下載原圖</el-button>
+              <el-button text :disabled="busy || imageLoading" @click="recrop">裁剪原圖</el-button>
               <el-button text :disabled="busy" @click="albumInput?.click()">更換原圖</el-button>
             </div>
             <span v-if="selected?.fileItemId" class="md5">MD5: {{ selected.md5 || '未記錄' }}</span>
@@ -495,6 +528,11 @@ onBeforeUnmount(revokeImage)
       </div>
       <template #footer><el-button v-if="selected" type="danger" link :disabled="busy" @click="removeReceipt(selected)">刪除</el-button><el-button :disabled="busy" @click="detailVisible = false">取消</el-button><el-button type="primary" :loading="busy" @click="save">保存</el-button></template>
     </el-dialog>
+
+    <!-- 先裁剪再上傳：剪裁結果直接當原圖保存 -->
+    <ImageCropDialog v-model="cropVisible" :source="cropSource" :file-name="cropName"
+      hint="把票據四邊拉進框內，裁掉桌面和背景；框外的部分不會上傳，也不會參與識別。"
+      @confirm="attachCropped" />
 
     <el-dialog v-model="exportVisible" title="提取票據圖片" width="min(560px, calc(100vw - 32px))" :close-on-click-modal="!exporting" :show-close="!exporting" :close-on-press-escape="!exporting">
       <el-form ref="exportFormRef" class="export-form" :model="exportForm" :rules="exportRules" label-position="top" :disabled="exporting">

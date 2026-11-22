@@ -214,6 +214,10 @@ User ─┬─ UserRole ── Role ── RolePermission ── Permission
 ### OCR 識別（會計收據）
 
 - 票據可直接手動錄入（不必先有原圖），原圖可稍後補上或更換。前端只有一個「保存」動作，保存後即完成，沒有草稿狀態；必填為票據類型、支出分類（不能是 pending）及地盤分類，日期、金額、幣種可留空。OCR 只在使用者按「OCR 識別」時執行，回傳建議欄位，由使用者決定是否填入（只填空白欄位），不直接改寫票據資料。
+- **原圖一律先裁剪再上傳**：拍照 / 選圖後打開 `components/ImageCropDialog.vue`，拉框裁掉桌面、背景和手指，確認後才上傳；已保存的原圖可再按「裁剪原圖」下載回來重裁（等於更換原圖，會清掉舊的識別結果）。裁剪用原生 Canvas（`utils/cropImage.ts`），**不引入裁剪庫**，`specs/tech-stack.md` 沒有列的不裝。
+  - 解碼時按 EXIF 轉正（手機直拍不會躺倒），另備「旋轉 90°」按鈕；支援自由 / 1:1 / 4:3 / 3:4 / 16:9 比例，鎖比例時以拖動位移推另一邊。
+  - 預覽是縮到 1280px 的縮圖（拖框流暢），落盤才按原圖像素裁切，所以裁剪不會降低解析度。
+  - 輸出統一 JPEG（先填白底，PNG 透明不會變黑），逐級降質、必要時縮尺寸，保證 ≤ 4 MB（後端 `ReceiptService.CheckImageAsync` 的上限）。選圖端放寬到 10 MB，因為大圖裁剪後會縮下來。
 - `IOcrService` 位於 Common/Infrastructure/Ocr，使用官方 C# SDK `Azure.AI.DocumentIntelligence`；客戶端由 `DocumentIntelligenceClientProvider` 共用（考勤卡掃描用同一個 client）；憑據只從環境變量 `AZURE_DOC_ENDPOINT` / `AZURE_DOC_KEY` 讀取，代碼和 appsettings 不出現密鑰；收據中文識別須實測，不能保證準確率。
 - `Receipt.SiteCategoryDictId` 引用 `AccountingSiteCategory` 字典（顯示名「地盤分類」），是票據唯一的地盤歸屬，同時決定導出 ZIP 的頂層目錄；考勤的打卡明細也用同一份名單（`AttendanceRecord.SiteDictId`），**會計與考勤共用一個地盤分組**，不再各自維護。
 - `DocumentTypeDictId` 引用 `AccountingDocumentType`（receipt / invoice）。支出分類由 `Receipt.Type` 持有（`Accounting` 字典），沒有原圖也可保存；有原圖時同步寫入 `FileItem.Type`，供文件模組按分類展示。

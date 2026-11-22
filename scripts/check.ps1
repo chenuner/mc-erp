@@ -20,6 +20,10 @@ try {
     dotnet run --project tests/Attendance.Checks/Attendance.Checks.csproj -c Release
     if ($LASTEXITCODE -ne 0) { throw 'Attendance checks 失敗' }
 
+    Write-Host '==> Frontend crop checks' -ForegroundColor Cyan
+    pnpm -C frontend run check
+    if ($LASTEXITCODE -ne 0) { throw '前端裁剪檢查失敗' }
+
     Write-Host '==> Frontend typecheck + build' -ForegroundColor Cyan
     pnpm -C frontend run build
     if ($LASTEXITCODE -ne 0) { throw '前端建置失敗' }
