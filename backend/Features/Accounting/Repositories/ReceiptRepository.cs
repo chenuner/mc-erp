@@ -7,6 +7,25 @@ namespace MC.Erp.Features.Accounting.Repositories;
 public sealed record ReceiptFilter(Guid? DocumentTypeDictId = null,
     Guid? Type = null, Guid? SiteCategoryDictId = null, DateOnly? Start = null, DateOnly? End = null);
 
+/// <summary>列表一行：只有列表欄位，OcrText / OcrResultJson 不查。</summary>
+public sealed record ReceiptListItem(Guid Id, Guid Version, Guid? FileItemId, string? FileName, string? ContentType,
+    string? Md5, long? SizeBytes, Guid DocumentTypeDictId, string DocumentTypeLabel,
+    Guid Type, string TypeLabel, Guid? SiteCategoryDictId, string? SiteCategoryLabel,
+    DateOnly? ReceiptDate, decimal? Amount, string? CurrencyCode, string? MerchantName,
+    string? InvoiceNumber, string? Remark, string OcrStatus, string? OcrError);
+
+/// <summary>詳情：列表欄位加上 OCR 原文和識別建議。</summary>
+public sealed record ReceiptDetail(Guid Id, Guid Version, Guid? FileItemId, string? FileName, string? ContentType,
+    string? Md5, long? SizeBytes, Guid DocumentTypeDictId, string DocumentTypeLabel,
+    Guid Type, string TypeLabel, Guid? SiteCategoryDictId, string? SiteCategoryLabel,
+    DateOnly? ReceiptDate, decimal? Amount, string? CurrencyCode, string? MerchantName,
+    string? InvoiceNumber, string? Remark, string OcrStatus, string? OcrError,
+    string? OcrText, string? OcrResultJson);
+
+/// <summary>導出 ZIP 需要的欄位：原圖信息和目錄名。</summary>
+public sealed record ReceiptExport(Guid Id, Guid FileItemId, DateOnly? ReceiptDate, string? SiteCategoryLabel,
+    string TypeLabel, string FileName, long SizeBytes);
+
 /// <summary>單一幣種的金額合計；CurrencyCode 為 null 代表票據有金額但沒填幣種。</summary>
 public sealed record ReceiptCurrencyTotal(string? CurrencyCode, int Count, decimal Amount);
 
@@ -28,18 +47,41 @@ public sealed class ReceiptRepository(ErpDbContext db, IHttpContextAccessor cont
         .Where(receipt => filter.Start == null || receipt.ReceiptDate >= filter.Start)
         .Where(receipt => filter.End == null || receipt.ReceiptDate <= filter.End);
 
-    private IQueryable<Receipt> Query(ReceiptFilter filter) => Filtered(filter)
-        .Include(receipt => receipt.FileItem)
-        .Include(receipt => receipt.TypeDict)
-        .Include(receipt => receipt.DocumentTypeDict).Include(receipt => receipt.SiteCategoryDict);
+    /// <summary>列表和詳情只投影需要的欄位；OcrText、OcrResultJson 這類大欄位留在列表之外，不讓每一頁都拖下來。</summary>
+    private IQueryable<ReceiptListItem> ProjectList(IQueryable<Receipt> query) => query.Select(receipt => new ReceiptListItem(
+        receipt.Id, receipt.Version, receipt.FileItemId,
+        receipt.FileItem == null ? null : receipt.FileItem.OriginalName,
+        receipt.FileItem == null ? null : receipt.FileItem.ContentType,
+        receipt.FileItem == null ? null : receipt.FileItem.Md5,
+        receipt.FileItem == null ? null : (long?)receipt.FileItem.SizeBytes,
+        receipt.DocumentTypeDictId, receipt.DocumentTypeDict.Label,
+        receipt.Type, receipt.TypeDict.Label,
+        receipt.SiteCategoryDictId, receipt.SiteCategoryDict == null ? null : receipt.SiteCategoryDict.Label,
+        receipt.ReceiptDate, receipt.Amount, receipt.CurrencyCode, receipt.MerchantName,
+        receipt.InvoiceNumber, receipt.Remark, receipt.OcrStatus, receipt.OcrError));
 
-    public async Task<(List<Receipt> Items, int Total, ReceiptTotals Totals)> ListAsync(
+    private IQueryable<ReceiptDetail> ProjectDetail(IQueryable<Receipt> query) => query.Select(receipt => new ReceiptDetail(
+        receipt.Id, receipt.Version, receipt.FileItemId,
+        receipt.FileItem == null ? null : receipt.FileItem.OriginalName,
+        receipt.FileItem == null ? null : receipt.FileItem.ContentType,
+        receipt.FileItem == null ? null : receipt.FileItem.Md5,
+        receipt.FileItem == null ? null : (long?)receipt.FileItem.SizeBytes,
+        receipt.DocumentTypeDictId, receipt.DocumentTypeDict.Label,
+        receipt.Type, receipt.TypeDict.Label,
+        receipt.SiteCategoryDictId, receipt.SiteCategoryDict == null ? null : receipt.SiteCategoryDict.Label,
+        receipt.ReceiptDate, receipt.Amount, receipt.CurrencyCode, receipt.MerchantName,
+        receipt.InvoiceNumber, receipt.Remark, receipt.OcrStatus, receipt.OcrError,
+        receipt.OcrText, receipt.OcrResultJson));
+
+    /// <summary>排序和分頁留在實體側，投影放最後；順序反過來 EF 就把整個 record 構造器當成不可翻譯的成員訪問。</summary>
+    public async Task<(List<ReceiptListItem> Items, int Total, ReceiptTotals Totals)> ListAsync(
         ReceiptFilter filter, int page, int pageSize)
     {
-        var query = Query(filter).AsNoTracking();
-        var total = await query.CountAsync(Token);
-        var items = await query.OrderByDescending(receipt => receipt.ReceiptDate).ThenByDescending(receipt => receipt.Id)
-            .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(Token);
+        var total = await Filtered(filter).CountAsync(Token);
+        var pageQuery = Filtered(filter).AsNoTracking()
+            .OrderByDescending(receipt => receipt.ReceiptDate).ThenByDescending(receipt => receipt.Id)
+            .Skip((page - 1) * pageSize).Take(pageSize);
+        var items = await ProjectList(pageQuery).ToListAsync(Token);
         // 合計按整份篩選結果算，不受分頁影響；幣種分開，HKD / CNY / USD 不會加在一起
         var amounts = await Filtered(filter).AsNoTracking()
             .Where(receipt => receipt.Amount != null)
@@ -51,11 +93,23 @@ public sealed class ReceiptRepository(ErpDbContext db, IHttpContextAccessor cont
         return (items, total, new ReceiptTotals(amounts, total - amounts.Sum(item => item.Count)));
     }
 
-    public Task<List<Receipt>> ExportAsync(ReceiptFilter filter) => Query(filter).AsNoTracking()
+    /// <summary>導出 ZIP 用：只查目錄名和原圖大小，不整行拉。</summary>
+    public Task<List<ReceiptExport>> ExportAsync(ReceiptFilter filter) => Filtered(filter).AsNoTracking()
         .Where(receipt => receipt.FileItemId != null)
-        .OrderBy(receipt => receipt.ReceiptDate).ThenBy(receipt => receipt.Id).Take(5001).ToListAsync(Token);
+        .OrderBy(receipt => receipt.ReceiptDate).ThenBy(receipt => receipt.Id).Take(5001)
+        .Select(receipt => new ReceiptExport(receipt.Id, receipt.FileItemId!.Value, receipt.ReceiptDate,
+            receipt.SiteCategoryDict == null ? null : receipt.SiteCategoryDict.Label, receipt.TypeDict.Label,
+            receipt.FileItem!.OriginalName, receipt.FileItem.SizeBytes))
+        .ToListAsync(Token);
 
-    public Task<Receipt?> FindAsync(Guid id) => Query(new()).FirstOrDefaultAsync(receipt => receipt.Id == id, Token);
+    public Task<ReceiptDetail?> FindDetailAsync(Guid id) => ProjectDetail(Filtered(new()).AsNoTracking()
+        .Where(receipt => receipt.Id == id)).FirstOrDefaultAsync(Token);
+
+    /// <summary>寫入用的整行實體：只有保存、識別需要，查詢一律走上面的投影。</summary>
+    public Task<Receipt?> FindTrackedAsync(Guid id) => db.Receipts
+        .Include(receipt => receipt.FileItem).Include(receipt => receipt.DocumentTypeDict)
+        .Include(receipt => receipt.TypeDict).Include(receipt => receipt.SiteCategoryDict)
+        .FirstOrDefaultAsync(receipt => receipt.Id == id, Token);
 
     public async Task AddAsync(Receipt receipt)
     {

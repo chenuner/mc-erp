@@ -1,4 +1,5 @@
 import request from './request'
+import type { PagedResult } from './system'
 
 export interface FileDto {
   id: string
@@ -12,8 +13,11 @@ export interface FileDto {
   md5: string | null
 }
 
-export async function listFiles(type?: string): Promise<FileDto[]> {
-  return (await request.get('/storage/files', { params: type ? { type } : {} })) as FileDto[]
+/** 文件列表：按上傳時間倒序分頁，一頁預設 20 筆。 */
+export async function listFiles(type?: string, page = 1, pageSize = 20): Promise<PagedResult<FileDto>> {
+  return (await request.get('/storage/files', {
+    params: { ...(type ? { type } : {}), page, pageSize },
+  })) as PagedResult<FileDto>
 }
 
 export async function uploadFile(type: string, file: File): Promise<FileDto> {

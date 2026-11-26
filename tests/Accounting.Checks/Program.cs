@@ -4,6 +4,7 @@ using Azure.AI.DocumentIntelligence;
 using MC.Erp.Common.Infrastructure.Ocr;
 using MC.Erp.Features.Accounting.Endpoints;
 using MC.Erp.Features.Accounting.Entities;
+using MC.Erp.Features.Accounting.Repositories;
 using MC.Erp.Features.Accounting.Services;
 using MC.Erp.Features.System.Entities;
 
@@ -123,19 +124,24 @@ Check(multiDocumentRejected, "Multiple documents rejected");
 Check(ReceiptService.SuggestCategory(receipt with { Text = "cement rental", ReceiptType = new OcrField<string?>(null, null) }) == null, "Conflicting categories stay pending");
 Check(ReceiptService.SuggestCategory(receipt with { ReceiptType = new OcrField<string?>("Transportation.Parking", null) }) == "transport", "Azure receipt type mapping");
 // 回應只帶票據欄位：新資料存識別建議、可原樣回傳；舊的 Azure 原始 JSON 不回前端
-Receipt StoredReceipt(string json) => new()
-{
-    DocumentTypeDict = new SysDict { Label = "收據" },
-    TypeDict = new SysDict { Label = "材料" },
-    OcrResultJson = json
-};
-var storedResponse = ReceiptResponse.From(StoredReceipt(JsonSerializer.Serialize(new OcrSuggestion(
+ReceiptDetail StoredDetail(string json) => new(Guid.NewGuid(), Guid.NewGuid(), null, null, null, null, null,
+    Guid.NewGuid(), "收據", Guid.NewGuid(), "材料", null, null,
+    new DateOnly(2026, 11, 18), 1234.50m, "HKD", "陳記", "INV-1", "備註", "Succeeded", null,
+    "整段原文", json);
+var storedResponse = ReceiptResponse.From(StoredDetail(JsonSerializer.Serialize(new OcrSuggestion(
     new OcrField<string?>("陳記", 0.93f), new OcrField<DateOnly?>(new DateOnly(2026, 11, 18), 0.91f),
     new OcrField<decimal?>(1234.50m, 0.62f), new OcrField<string?>("HKD", 0.62f),
     new OcrField<string?>(null, null), null, new[] { "amount" }))));
 Check(storedResponse.OcrResult?.Amount.Value == 1234.50m, "Stored suggestion round-trips");
 Check(storedResponse.OcrResult?.ReviewFields.Contains("amount") == true, "Stored review fields survive");
-Check(ReceiptResponse.From(StoredReceipt("""
+// 列表回應的型別本身不含 OCR 原文和識別建議：序列化後連 key 都不該出現
+var listedJson = JsonSerializer.Serialize(ReceiptListResponse.From(new ReceiptListItem(Guid.NewGuid(), Guid.NewGuid(),
+    null, null, null, null, null, Guid.NewGuid(), "收據", Guid.NewGuid(), "材料", null, null,
+    new DateOnly(2026, 11, 18), 1234.50m, "HKD", null, null, null, "Succeeded", null)),
+    new JsonSerializerOptions(JsonSerializerDefaults.Web));
+Check(!listedJson.Contains("ocrText") && !listedJson.Contains("ocrResult"), "List response has no OCR fields");
+Check(listedJson.Contains("\"ocrStatus\":\"Succeeded\"", StringComparison.Ordinal), "List still carries receipt fields");
+Check(ReceiptResponse.From(StoredDetail("""
 {"apiVersion":"2024-11-30","modelId":"prebuilt-receipt","documents":[]}
 """)).OcrResult == null, "Legacy Azure payload is not returned to the client");
 var unsafeName = ReceiptService.SafeName("../../bad\\image:*.png");

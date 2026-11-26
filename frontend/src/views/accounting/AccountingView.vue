@@ -160,12 +160,15 @@ function openCreate() {
 
 async function openDetail(receipt: ReceiptDto) {
   busy.value = true
+  // 列表不帶識別結果，先把詳情填充，等識別結果回來再補；按鈕依賴 selected，要早點設好
+  fill(receipt)
+  ocrPanel.value = []
+  ocrReview.value = []
+  detailVisible.value = true
   try {
     const detail = await getReceipt(receipt.id)
     fill(detail)
-    ocrPanel.value = []
     ocrReview.value = detail.ocrResult?.reviewFields ?? []
-    detailVisible.value = true
     revokeImage()
     imageLoading.value = true
     if (detail.fileItemId) imageUrl.value = URL.createObjectURL(await receiptImage(detail.id))

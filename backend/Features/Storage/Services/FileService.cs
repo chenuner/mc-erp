@@ -66,15 +66,20 @@ public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentU
         return existing;
     }
 
-    public async Task<List<FileItem>> 列表Async(Guid? type, CancellationToken ct)
+    public async Task<(List<FileItem> Items, int Total)> 列表Async(Guid? type, int page, int pageSize, CancellationToken ct)
     {
-        return await db.FileItems
+        var query = db.FileItems
             .AsNoTracking()
-            .Include(f => f.TypeDict)
             .Where(f => !f.IsDeleted && (type == null || f.Type == type))
-            .Where(f => user.IsInRole("Admin") || f.TypeDict == null || f.TypeDict.GroupName != "Accounting")
-            .OrderByDescending(f => f.CreatedAt)
+            .Where(f => user.IsInRole("Admin") || f.TypeDict == null || f.TypeDict.GroupName != "Accounting");
+        var total = await query.CountAsync(ct);
+        // 批量上傳的時間戳常常相同，加 Id 當次序，分頁才不會重複或漏行
+        var items = await query
+            .Include(f => f.TypeDict)
+            .OrderByDescending(f => f.CreatedAt).ThenByDescending(f => f.Id)
+            .Skip((page - 1) * pageSize).Take(pageSize)
             .ToListAsync(ct);
+        return (items, total);
     }
 
     public async Task<(Stream Content, FileItem File)?> 下载Async(Guid id, CancellationToken ct = default)
