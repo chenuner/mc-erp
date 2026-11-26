@@ -226,6 +226,12 @@ internal static class IntegrationChecks
             Check(filtered.GetProperty("total").GetInt32() == 1, "document type filtering");
             filtered = await Get("accounting/receipts?start=2026-01-01&end=2026-12-31&pageSize=1");
             Check(filtered.GetProperty("total").GetInt32() == 3 && filtered.GetProperty("items").GetArrayLength() == 1, "list pagination and image-free receipt listed");
+            Check(!filtered.GetProperty("items").EnumerateArray().Any(item =>
+                    item.TryGetProperty("ocrText", out _) || item.TryGetProperty("ocrResult", out _)),
+                "list response omits OCR text and suggestion");
+            using (var detailJson = await client.GetAsync($"accounting/receipts/{first.Id}"))
+                Check((await detailJson.Content.ReadAsStringAsync()).Contains("\"ocrText\"", StringComparison.Ordinal),
+                    "detail response still carries OCR text");
             // 合計按整份篩選結果算，pageSize=1 時仍然是 3 張的合計
             var totals = filtered.GetProperty("totals");
             var allHkd = totals.GetProperty("amounts").EnumerateArray().Single();
@@ -314,8 +320,15 @@ internal static class IntegrationChecks
             using (var denied = await client.GetAsync("accounting/receipts")) Check(denied.StatusCode == HttpStatusCode.Forbidden, "worker Accounting rejected");
             using (var denied = await client.GetAsync($"storage/files/{first.FileItemId!.Value}/download")) Check(denied.StatusCode == HttpStatusCode.Forbidden, "worker Storage bypass rejected");
             filtered = await Get("storage/files");
-            Check(filtered.GetArrayLength() == 0, "worker list hides Accounting images");
+            Check(filtered.GetProperty("items").GetArrayLength() == 0 && filtered.GetProperty("total").GetInt32() == 0,
+                "worker list hides Accounting images");
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            var allFiles = await Get("storage/files");
+            var allFileCount = allFiles.GetProperty("total").GetInt32();
+            Check(allFiles.GetProperty("items").GetArrayLength() == allFileCount, "storage list returns one page of items with total");
+            var secondPage = await Get("storage/files?pageSize=1&page=2");
+            Check(allFileCount >= 2 && secondPage.GetProperty("items").GetArrayLength() == 1
+                && secondPage.GetProperty("page").GetInt32() == 2, "storage list paginates by page size");
             using (var disablePending = await client.PutAsJsonAsync($"system/dicts/{pendingId}", new { enabled = false }))
                 Check(disablePending.StatusCode == HttpStatusCode.BadRequest, "pending category cannot be disabled");
             using (var deletePending = await client.DeleteAsync($"system/dicts/{pendingId}"))

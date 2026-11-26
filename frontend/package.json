@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "typecheck": "vue-tsc -b",
+    "check": "node --experimental-strip-types scripts/check-crop.ts",
     "preview": "vite preview"
   },
   "dependencies": {

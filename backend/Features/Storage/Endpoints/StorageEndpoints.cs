@@ -1,3 +1,4 @@
+using MC.Erp.Common;
 using MC.Erp.Common.Errors;
 using MC.Erp.Features.Storage.Entities;
 using MC.Erp.Features.Storage.Services;
@@ -23,11 +24,13 @@ public static class StorageEndpoints
         group.MapDelete("/files/{id:guid}", DeleteFileAsync).RequireAuthorization();
     }
 
-    private static async Task<Ok<List<FileDto>>> ListFilesAsync(
-        Guid? type, FileService svc, CancellationToken ct)
+    private static async Task<Ok<PagedResult<FileDto>>> ListFilesAsync(
+        Guid? type, int? page, int? pageSize, FileService svc, CancellationToken ct)
     {
-        var items = await svc.列表Async(type, ct);
-        return TypedResults.Ok(items.Select(FileDto.From).ToList());
+        var currentPage = Math.Clamp(page ?? 1, 1, 1000000);
+        var size = Math.Clamp(pageSize ?? 20, 1, 100);
+        var (items, total) = await svc.列表Async(type, currentPage, size, ct);
+        return TypedResults.Ok(new PagedResult<FileDto>(items.Select(FileDto.From).ToList(), total, currentPage, size));
     }
 
     private static async Task<Results<Created<FileDto>, ValidationProblem>> UploadFileAsync(

@@ -22,10 +22,14 @@ export interface ReceiptDto {
   remark: string | null
   ocrStatus: string
   ocrError: string | null
-  ocrText: string | null
-  /** 已保存的識別建議；舊資料沒有欄位結構時為 null。 */
-  ocrResult: OcrSuggestion | null
+  /** 只有詳情接口有；列表回應不含這兩欄。 */
+  ocrText?: string | null
+  /** 已保存的識別建議；舊資料沒有欄位結構時為 null。只有詳情接口有。 */
+  ocrResult?: OcrSuggestion | null
 }
+
+/** 列表一行：後端 ReceiptListResponse 的形狀，OCR 原文和識別建議不在裡面。 */
+export type ReceiptListDto = Omit<ReceiptDto, 'ocrText' | 'ocrResult'>
 
 /** 單一識別欄位：值 + Azure 回報的置信度（0–1）；未識別到時兩者皆為 null。 */
 export interface OcrField<T> {
@@ -78,8 +82,8 @@ export interface ReceiptTotals {
   missingAmount: number
 }
 
-export async function listReceipts(query: ReceiptQuery, page = 1, pageSize = 20): Promise<PagedResult<ReceiptDto> & { totals: ReceiptTotals }> {
-  return await request.get('/accounting/receipts', { params: { ...query, page, pageSize } }) as PagedResult<ReceiptDto> & { totals: ReceiptTotals }
+export async function listReceipts(query: ReceiptQuery, page = 1, pageSize = 20): Promise<PagedResult<ReceiptListDto> & { totals: ReceiptTotals }> {
+  return await request.get('/accounting/receipts', { params: { ...query, page, pageSize } }) as PagedResult<ReceiptListDto> & { totals: ReceiptTotals }
 }
 
 export async function getReceipt(id: string): Promise<ReceiptDto> {

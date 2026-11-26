@@ -27,9 +27,12 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
     IOcrService ocr, ILogger<ReceiptService> logger)
 {
     public bool OcrConfigured => ocr.IsConfigured;
-    public Task<(List<Receipt> Items, int Total, ReceiptTotals Totals)> ListAsync(ReceiptFilter filter, int page, int pageSize)
+    public Task<(List<ReceiptListItem> Items, int Total, ReceiptTotals Totals)> ListAsync(ReceiptFilter filter, int page, int pageSize)
         => repo.ListAsync(filter, page, pageSize);
-    public async Task<Receipt> FindAsync(Guid id) => await repo.FindAsync(id) ?? throw new KeyNotFoundException("票據不存在");
+    /// <summary>詳情：只投影需要的欄位，打開詳情才拉 OCR 原文。</summary>
+    public async Task<ReceiptDetail> FindAsync(Guid id) => await repo.FindDetailAsync(id) ?? throw new KeyNotFoundException("票據不存在");
+    /// <summary>寫入用：需要追蹤的整行實體（保存、識別、刪除）。</summary>
+    private async Task<Receipt> FindTrackedAsync(Guid id) => await repo.FindTrackedAsync(id) ?? throw new KeyNotFoundException("票據不存在");
 
     private async Task<SysDict> DictAsync(Guid id, string group)
     {
@@ -38,7 +41,7 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
         return dict;
     }
 
-    public async Task<Receipt> CreateAsync(Guid documentTypeDictId)
+    public async Task<ReceiptDetail> CreateAsync(Guid documentTypeDictId)
     {
         var documentType = await DictAsync(documentTypeDictId, "AccountingDocumentType");
         CheckModel(documentType.Value);
@@ -49,9 +52,9 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
     }
 
     /// <summary>補上或更換票據原圖；有原圖後才可 OCR。更換原圖會清除舊的識別結果。</summary>
-    public async Task<Receipt> AttachImageAsync(Guid id, IFormFile image)
+    public async Task<ReceiptDetail> AttachImageAsync(Guid id, IFormFile image)
     {
-        var receipt = await FindAsync(id);
+        var receipt = await FindTrackedAsync(id);
         if (receipt.OcrStatus == "Processing" && receipt.OcrStartedAt > DateTime.UtcNow.AddMinutes(-3))
             throw new InvalidOperationException("識別進行中，請稍後再更換原圖");
         var mime = await CheckImageAsync(image);
@@ -78,13 +81,13 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
             try { await files.删除Async(old); }
             catch (Exception cleanup) { logger.LogWarning(cleanup, "Receipt image replacement cleanup failed for {FileId}", old); }
         }
-        return receipt;
+        return await FindAsync(id);
     }
 
     /// <summary>刪除票據並清理原圖；端點已限定管理員。</summary>
     public async Task DeleteAsync(Guid id)
     {
-        var receipt = await FindAsync(id);
+        var receipt = await FindTrackedAsync(id);
         if (receipt.OcrStatus == "Processing" && receipt.OcrStartedAt > DateTime.UtcNow.AddMinutes(-3))
             throw new InvalidOperationException("識別進行中，請稍後再刪除");
         var fileId = receipt.FileItemId;
@@ -117,9 +120,9 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
         if (value is not ("receipt" or "invoice")) throw new InvalidOperationException("票據類型只支援 receipt / invoice");
     }
 
-    public async Task<Receipt> UpdateAsync(Guid id, UpdateReceiptRequest request)
+    public async Task<ReceiptDetail> UpdateAsync(Guid id, UpdateReceiptRequest request)
     {
-        var receipt = await FindAsync(id);
+        var receipt = await FindTrackedAsync(id);
         if (receipt.Version != request.Version) throw new DbUpdateConcurrencyException();
         if (receipt.OcrStatus == "Processing" && receipt.OcrStartedAt > DateTime.UtcNow.AddMinutes(-3))
             throw new InvalidOperationException("識別進行中，請稍後保存");
@@ -156,13 +159,13 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
             if (receipt.FileItemId is { } fileId) await files.设置类别Async(fileId, type.Id);
             await repo.SaveAsync(receipt);
         });
-        return receipt;
+        return await FindAsync(id);
     }
 
     /// <summary>辨識原圖並回傳建議欄位；不改寫票據資料，由使用者核對後自行填入及保存。</summary>
-    public async Task<(Receipt Receipt, OcrSuggestion Fields)> RecognizeAsync(Guid id, Guid? documentTypeDictId = null)
+    public async Task<(ReceiptDetail Receipt, OcrSuggestion Fields)> RecognizeAsync(Guid id, Guid? documentTypeDictId = null)
     {
-        var receipt = await FindAsync(id);
+        var receipt = await FindTrackedAsync(id);
         if (receipt.FileItemId is null) throw new InvalidOperationException("尚未上傳原圖，請先上傳圖片再識別");
         if (!ocr.IsConfigured) throw new InvalidOperationException("Azure 識別服務尚未配置，原圖已保存，可手動填寫");
         var documentType = await DictAsync(documentTypeDictId ?? receipt.DocumentTypeDictId, "AccountingDocumentType");
@@ -179,7 +182,7 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
             receipt.OcrText = result.Text;
             receipt.OcrStatus = "Succeeded";
             await repo.SaveRecognitionAsync(receipt);
-            return (receipt, suggestion);
+            return (await FindAsync(id), suggestion);
         }
         catch (DbUpdateConcurrencyException) { throw; }
         catch (Exception exception) when (exception is Azure.RequestFailedException or OperationCanceledException or IOException or InvalidOperationException)
@@ -189,7 +192,7 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
             receipt.OcrError = exception is OperationCanceledException ? "識別超時或請求已取消，原圖保留，請重試"
                 : exception is InvalidOperationException ? exception.Message : "識別服務失敗，原圖保留，請重試或手動填寫";
             await repo.SaveRecognitionAsync(receipt);
-            return (receipt, EmptySuggestion());
+            return (await FindAsync(id), EmptySuggestion());
         }
     }
 
@@ -235,11 +238,11 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
     {
         var receipts = await repo.ExportAsync(filter);
         if (receipts.Count == 0) throw new KeyNotFoundException("沒有符合條件的圖片");
-        if (receipts.Count > 5000 || receipts.Sum(receipt => receipt.FileItem!.SizeBytes) > 250L * 1024 * 1024)
+        if (receipts.Count > 5000 || receipts.Sum(receipt => receipt.SizeBytes) > 250L * 1024 * 1024)
             throw new InvalidOperationException("提取上限為 5000 張 / 250 MB，請縮小日期範圍");
-        var entries = receipts.Select(receipt => (receipt.FileItemId!.Value,
-            $"{SafeName(receipt.SiteCategoryDict?.Label ?? "未分類地盤")}/{SafeName(receipt.TypeDict.Label)}/"
-                + $"{receipt.ReceiptDate:yyyy-MM-dd}_{receipt.Id:N}_{SafeName(receipt.FileItem!.OriginalName)}")).ToList();
+        var entries = receipts.Select(receipt => (receipt.FileItemId,
+            $"{SafeName(receipt.SiteCategoryLabel ?? "未分類地盤")}/{SafeName(receipt.TypeLabel)}/"
+                + $"{receipt.ReceiptDate:yyyy-MM-dd}_{receipt.Id:N}_{SafeName(receipt.FileName)}")).ToList();
         return (await files.打包Async(entries), $"accounting-{DateTime.UtcNow:yyyyMMdd-HHmmss}.zip");
     }
 

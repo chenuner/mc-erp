@@ -44,6 +44,9 @@ async function fetchDicts() {
 // ---------- 文件 ----------
 const fileLoading = ref(false)
 const files = ref<FileDto[]>([])
+const page = ref(1)
+const pageSize = 20
+const total = ref(0)
 const viewMode = ref<ViewMode>('list')
 
 function formatSize(bytes: number): string {
@@ -80,12 +83,22 @@ function fileTypeInfo(contentType: string, name: string): FileTypeInfo {
 async function fetchFiles() {
   fileLoading.value = true
   try {
-    files.value = await listFiles(filterType.value || undefined)
+    const result = await listFiles(filterType.value || undefined, page.value, pageSize)
+    files.value = result.items
+    total.value = result.total
   } catch {
     /* 攔截器已提示 */
   } finally {
     fileLoading.value = false
   }
+}
+
+/** 換頁：縮略圖只留當前頁，順手清掉上一頁的 object URL */
+async function changePage(next: number) {
+  if (next === page.value) return
+  clearThumbs()
+  page.value = next
+  await fetchFiles()
 }
 
 // ---------- 上傳 ----------
@@ -134,7 +147,11 @@ async function confirmUpload() {
         failed.push(f.name)
       }
     }
-    if (ok > 0) await fetchFiles()
+    if (ok > 0) {
+      // 新文件按上傳時間排最前，回到第一頁才看得到
+      page.value = 1
+      await fetchFiles()
+    }
 
     if (ok > 0 && failed.length === 0) {
       ElMessage.success(`${ok} 個文件上傳成功`)
@@ -162,6 +179,8 @@ async function removeFile(row: FileDto) {
   try {
     await deleteFile(row.id)
     ElMessage.success('已刪除')
+    // 刪掉當前頁最後一筆時退回上一頁，不留空白頁
+    if (files.value.length === 1 && page.value > 1) page.value--
     await fetchFiles()
   } catch {
     /* 攔截器已提示 */
@@ -312,6 +331,7 @@ function clearThumbs() {
 
 watch(filterType, () => {
   clearThumbs()
+  page.value = 1
   fetchFiles()
 })
 
@@ -448,6 +468,18 @@ onMounted(async () => {
       <el-empty v-else description="暫無文件，點擊「上傳文件」歸檔地盤照片" :image-size="72" />
     </div>
 
+    <!-- 分頁：列表和網格共用同一份資料 -->
+    <div v-if="total > pageSize" class="pager">
+      <el-pagination
+        :current-page="page"
+        :page-size="pageSize"
+        :total="total"
+        layout="total, prev, pager, next"
+        background
+        @current-change="changePage"
+      />
+    </div>
+
     <!-- 上傳 -->
     <el-dialog
       v-model="uploadDialog"
@@ -572,6 +604,12 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 16px;
+}
+
+.pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 
 .file-card {

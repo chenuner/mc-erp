@@ -4,7 +4,7 @@
 >
 > **專案意志**：本地與生產的行為保持一致，不按 `ASPNETCORE_ENVIRONMENT` 切換功能（API 文檔等）。要新增 `IsDevelopment()` / `IsProduction()` 分支前，必須先向維護者確認。
 >
-> 最後更新：2026-11-22
+> 最後更新：2026-11-23
 ---
 
 ## 模組狀態
@@ -22,7 +22,7 @@
 | Attendance | 計薪（工數、MPF、OT、實付人工） | ✅ 由考勤卡同步或改打卡明細時按 `AttendanceRules` 重算「一個員工一個月的一個職位×地盤組合」；未做全月一鍵重算、沒有定時任務 | `AttendanceTableService.RecomputePayrollAsync` |
 | Attendance | 外部打卡 API 同步 | ❌ 未實現 | — |
 | Attendance | 考勤卡照片掃描（prebuilt-layout → 逐行打卡並落庫，每欄帶置信度；手寫年月姓名不計入複核，可雙擊人工修正；兩步流程：先「標記為已核對」，成功後才出現「同步」，按「同步」導入打卡明細並重算該員工該月薪酬；未核對不能同步，改過內容要重新按「標記為已核對」） | ✅ 可用（與票據共用 Azure 憑據，需配置才啟用） | `POST /api/attendance/scan`、`GET /api/attendance/scans`、`PUT /api/attendance/scans/{id}`、`POST /api/attendance/scans/{id}/confirm`、`POST /api/attendance/scans/{id}/sync` |
-| Accounting | 手動新增票據、上傳/補上原圖、OCR 建議（每欄帶置信度，低於閾值提示人工複核）、刪除票據、ZIP 匯出 | ✅ 可用（OCR 需配置才啟用） | `ReceiptService` |
+| Accounting | 手動新增票據、上傳/補上原圖（**先裁剪再上傳**，已存原圖可重裁）、OCR 建議（每欄帶置信度，低於閾值提示人工複核）、刪除票據、ZIP 匯出 | ✅ 可用（OCR 需配置才啟用） | `ReceiptService` / `ImageCropDialog.vue` |
 | Storage | 本地文件上傳 / 下載 / 刪除、MD5、**按 MD5 去重**（同內容共用一個物理文件，最後一筆記錄刪掉時才刪磁盤） | ✅ 可用 | `FileService` |
 | Storage | 按地盤 / 帳戶的檔案權限（FilePermission） | ❌ 未實現，目前只有 Admin / 非 Admin 粗粒度 | — |
 | Storage | 上傳類別的限制 | ⚠️ 只擋了「Accounting 分組需 Admin」，其餘分組任何已登入用戶都能上傳；是否需要更嚴的白名單待定 | `FileService.上传Async` |

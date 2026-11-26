@@ -1,7 +1,6 @@
 using System.Text.Json;
 using MC.Erp.Common;
 using MC.Erp.Common.Errors;
-using MC.Erp.Features.Accounting.Entities;
 using MC.Erp.Features.Accounting.Repositories;
 using MC.Erp.Features.Accounting.Services;
 using MC.Erp.Features.Storage.Services;
@@ -24,8 +23,8 @@ public static class AccountingEndpoints
             var size = Math.Clamp(pageSize ?? 20, 1, 100);
             var result = await service.ListAsync(filter, currentPage, size);
             // totals 按整份篩選結果算（不是當前頁）；金額按幣種分開，不混加
-            return TypedResults.Ok(new PagedResult<ReceiptResponse, ReceiptTotals>(
-                result.Items.Select(ReceiptResponse.From).ToList(), result.Total, currentPage, size, result.Totals));
+            return TypedResults.Ok(new PagedResult<ReceiptListResponse, ReceiptTotals>(
+                result.Items.Select(ReceiptListResponse.From).ToList(), result.Total, currentPage, size, result.Totals));
         });
         group.MapPost("/receipts", async (CreateReceiptRequest request, ReceiptService service) =>
         {
@@ -45,6 +44,7 @@ public static class AccountingEndpoints
             TypedResults.Ok(ReceiptResponse.From(await service.UpdateAsync(id, request))));
         group.MapPost("/receipts/{id:guid}/recognize", async (Guid id, Guid? documentTypeDictId, ReceiptService service) =>
         {
+            // 回票據（投影過，和 GET 詳情口徑一致）＋本次識別建議，前端要後者去填空白欄位
             var (receipt, fields) = await service.RecognizeAsync(id, documentTypeDictId);
             return TypedResults.Ok(new RecognizeResponse(ReceiptResponse.From(receipt), fields));
         });
@@ -55,9 +55,9 @@ public static class AccountingEndpoints
         });
         group.MapGet("/receipts/{id:guid}/image", async (Guid id, ReceiptService service, FileService files) =>
         {
-            var receipt = await service.FindAsync(id);
-            if (receipt.FileItemId is not { } fileId) throw new KeyNotFoundException("原圖不存在");
-            var download = await files.下载Async(fileId) ?? throw new KeyNotFoundException("原圖不存在");
+            var fileId = (await service.FindAsync(id)).FileItemId;
+            if (fileId is null) throw new KeyNotFoundException("原圖不存在");
+            var download = await files.下载Async(fileId.Value) ?? throw new KeyNotFoundException("原圖不存在");
             return TypedResults.File(download.Content, download.File.ContentType, download.File.OriginalName);
         });
     }
@@ -72,7 +72,22 @@ public static class AccountingEndpoints
 
 public sealed record CreateReceiptRequest(Guid DocumentTypeDictId);
 
+/// <summary>識別接口的回應：票據本體（詳情口徑）＋本次識別建議。</summary>
 public sealed record RecognizeResponse(ReceiptResponse Receipt, OcrSuggestion Fields);
+
+/// <summary>列表一行：只有票據欄位。OCR 原文和識別建議不在型別裡，打開詳情再拿。</summary>
+public sealed record ReceiptListResponse(Guid Id, Guid Version, Guid? FileItemId, string? FileName, string? Md5,
+    long? SizeBytes, Guid DocumentTypeDictId, string DocumentTypeLabel,
+    Guid Type, string TypeLabel, Guid? SiteCategoryDictId, string? SiteCategoryLabel,
+    DateOnly? ReceiptDate, decimal? Amount, string? CurrencyCode, string? MerchantName,
+    string? InvoiceNumber, string? Remark, string OcrStatus, string? OcrError)
+{
+    public static ReceiptListResponse From(ReceiptListItem item) => new(item.Id, item.Version,
+        item.FileItemId, item.FileName, item.Md5, item.SizeBytes,
+        item.DocumentTypeDictId, item.DocumentTypeLabel, item.Type, item.TypeLabel,
+        item.SiteCategoryDictId, item.SiteCategoryLabel, item.ReceiptDate, item.Amount, item.CurrencyCode,
+        item.MerchantName, item.InvoiceNumber, item.Remark, item.OcrStatus, item.OcrError);
+}
 
 public sealed record ReceiptResponse(Guid Id, Guid Version, Guid? FileItemId, string? FileName, string? Md5,
     long? SizeBytes, Guid DocumentTypeDictId, string DocumentTypeLabel,
@@ -81,13 +96,12 @@ public sealed record ReceiptResponse(Guid Id, Guid Version, Guid? FileItemId, st
     string? InvoiceNumber, string? Remark, string OcrStatus, string? OcrError,
     string? OcrText, OcrSuggestion? OcrResult)
 {
-    public static ReceiptResponse From(Receipt receipt) => new(receipt.Id, receipt.Version,
-        receipt.FileItemId, receipt.FileItem?.OriginalName, receipt.FileItem?.Md5, receipt.FileItem?.SizeBytes,
-        receipt.DocumentTypeDictId, receipt.DocumentTypeDict.Label,
-        receipt.Type, receipt.TypeDict.Label, receipt.SiteCategoryDictId, receipt.SiteCategoryDict?.Label,
-        receipt.ReceiptDate, receipt.Amount, receipt.CurrencyCode, receipt.MerchantName,
-        receipt.InvoiceNumber, receipt.Remark, receipt.OcrStatus, receipt.OcrError, receipt.OcrText,
-        ReadSuggestion(receipt.OcrResultJson));
+    public static ReceiptResponse From(ReceiptDetail detail) => new(detail.Id, detail.Version,
+        detail.FileItemId, detail.FileName, detail.Md5, detail.SizeBytes,
+        detail.DocumentTypeDictId, detail.DocumentTypeLabel, detail.Type, detail.TypeLabel,
+        detail.SiteCategoryDictId, detail.SiteCategoryLabel, detail.ReceiptDate, detail.Amount, detail.CurrencyCode,
+        detail.MerchantName, detail.InvoiceNumber, detail.Remark, detail.OcrStatus, detail.OcrError,
+        detail.OcrText, ReadSuggestion(detail.OcrResultJson));
 
     /// <summary>只回票據欄位。舊資料存的是 Azure 原始 JSON，解析不出欄位就當沒有，避免把整包原文回給前端。</summary>
     private static OcrSuggestion? ReadSuggestion(string? json)
