@@ -1,0 +1,15 @@
+@baseUrl = http://localhost:5209
+
+### 登錄（成功回 token，失敗回 401）
+POST {{baseUrl}}/api/identity/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "REPLACE_WITH_PASSWORD"
+}
+
+### 登錄限流：同一個 IP 一分鐘 20 次，第 21 次起回 429 + Retry-After
+# 連按上面那個請求 21 次就能看到（同一個 IP 共用計數，成功也算一次）。
+# 429 的 body 是 ProblemDetails，detail 會由前端直接彈出來；Retry-After 是還要等幾秒。
+# 開發時若要立刻再試，重啟後端即可（計數在內存裡）。

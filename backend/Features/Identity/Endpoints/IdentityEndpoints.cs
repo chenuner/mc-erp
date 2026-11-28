@@ -4,6 +4,7 @@ using MC.Erp.Common.Errors;
 using MC.Erp.Common.Security;
 using MC.Erp.Features.Identity.Services;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace MC.Erp.Features.Identity.Endpoints;
 
@@ -14,8 +15,8 @@ public static class IdentityEndpoints
         var group = app.MapGroup("/api/identity").WithTags("Identity");
         group.AddEndpointFilter<ExceptionProblemFilter>();
 
-        // 登錄
-        group.MapPost("/login", LoginAsync);
+        // 登錄（按客戶端 IP 限流：每分鐘 20 次，超出回 429）
+        group.MapPost("/login", LoginAsync).RequireRateLimiting(LoginRateLimit.Policy);
 
         // 用戶管理
         group.MapGet("/users", ListUsersAsync).RequireAuthorization("admin");

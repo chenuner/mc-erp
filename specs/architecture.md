@@ -170,6 +170,7 @@ User ─┬─ UserRole ── Role ── RolePermission ── Permission
 - **JWT** — 登錄後簽發，包含角色和權限信息
 - **身份展示** — `sub` 是用戶 ID，不用作姓名。前端 `username` 讀取名字聲明（兼容 `ClaimTypes.Name` 的完整 URI）；`displayName` 優先讀取 JWT 的 `display_name`，未設顯示名或使用舊令牌時回退到用戶名。JWT payload 按 UTF-8 解碼，僅供展示，不代替後端驗證。顯示名變更後需重新登錄取得新令牌。
 - **CurrentUser 上下文** — 通過 ASP.NET Core 的 ClaimsPrincipal 獲取，業務代碼直接用
+- **登錄限流** — `POST /api/identity/login` 是全系統最貴的計算（Argon2id 每次約 300ms CPU），必須限流：按客戶端 IP 分桶，20 次/分鐘、固定窗口，超額回 `429` + ProblemDetails + `Retry-After`（策略定義在 `Common/Security/LoginRateLimit`）。客戶端 IP 由 `Common/Http/ClientIpForwarding` 解析 `X-Forwarded-For`：生產環境是「宿主 nginx → web nginx → backend」兩跳，兩層都用 `$proxy_add_x_forwarded_for` 追加，故取最後 2 項（`ForwardLimit = 2`）；客戶端自己塞的值只會落在最左邊，取不到，偽造無效。沒有這層轉換時 `RemoteIpAddress` 永遠是 127.0.0.1，全站會共用同一個桶。
 
 ---
 

@@ -1,6 +1,7 @@
 using System.Text;
 using MC.Erp.Common;
 using MC.Erp.Common.Errors;
+using MC.Erp.Common.Http;
 using MC.Erp.Common.Security;
 using MC.Erp.Common.Infrastructure.Ocr;
 using MC.Erp.Features.Accounting.Endpoints;
@@ -81,6 +82,9 @@ builder.Services.AddAuthorization(opt =>
     opt.AddPolicy("admin", p => p.RequireRole("Admin"));
 });
 
+// 登錄限流：Argon2id 校驗很貴，不限流時十幾個併發就能打滿 CPU（見 Common/Security/LoginRateLimit.cs）
+builder.Services.AddLoginRateLimit();
+
 // 基礎設施
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<IPasswordHasher, PasswordHasher>();
@@ -143,9 +147,15 @@ builder.Services.AddExceptionHandler<BadRequestExceptionHandler>();
 
 var app = builder.Build();
 
+// 真實客戶端 IP（登錄限流按 IP 分桶靠它），必須在任何讀取 RemoteIpAddress 的元件之前
+app.UseForwardedClientIp();
+
 // 異常處理
 app.UseExceptionHandler();// 無 body 的 4xx/5xx 也轉成 ProblemDetails
 app.UseStatusCodePages();
+
+// 限流（在認證之前：早點拒絕，省掉後續工作）
+app.UseRateLimiter();
 
 // 認證 & 授權
 app.UseAuthentication();
