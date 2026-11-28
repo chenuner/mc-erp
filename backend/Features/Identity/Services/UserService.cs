@@ -30,6 +30,10 @@ public sealed class UserService(IUserRepository userRepo, IPasswordHasher hasher
         if (user is null)
             return null;
 
+        // 受保護的主管理員不能停用，否則沒人能再登入系統
+        if (isActive == false && user.IsProtected)
+            throw new InvalidOperationException("主管理員帳號不可停用");
+
         if (email is not null) user.Email = email;
         if (displayName is not null) user.DisplayName = displayName;
         if (isActive is not null) user.IsActive = isActive.Value;
@@ -43,6 +47,10 @@ public sealed class UserService(IUserRepository userRepo, IPasswordHasher hasher
         var user = await userRepo.GetByIdAsync(id, ct);
         if (user is null)
             return false;
+
+        // 主管理員不能刪（軟刪也不行：刪掉後沒人能登入，重啟還會撞唯一索引）
+        if (user.IsProtected)
+            throw new InvalidOperationException("主管理員帳號不可刪除");
 
         await userRepo.DeleteAsync(user, ct);
         return true;

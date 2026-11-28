@@ -47,8 +47,25 @@ function isNodeDisabled(node: DictTreeNode): boolean {
   return !(props.keepDisabledValue && dict.id === model.value)
 }
 
-function applyPolicy(nodes: DictTreeNode[]): DictTreeNode[] {
-  return nodes.map((node) => ({ ...node, disabled: isNodeDisabled(node), children: applyPolicy(node.children) }))
+/** 丟棄字典項時（例如上級被停用）跟著失效的分支：上級停用 = 整條分支都不再用。 */
+function ancestorDisabled(dict: SysDictDto): boolean {
+  const seen = new Set<string>([dict.id])
+  let parentId = dict.parentId
+  while (parentId && seen.add(parentId)) {
+    const parent = byId.value.get(parentId)
+    if (!parent) return false
+    if (!parent.enabled) return true
+    parentId = parent.parentId
+  }
+  return false
+}
+
+function applyPolicy(nodes: DictTreeNode[], offByAncestor = false): DictTreeNode[] {
+  return nodes.map((node) => {
+    // allowDisabled（歷史篩選）只看自己：上級停用時仍要能篩到掛在舊子項上的資料
+    const disabled = offByAncestor || isNodeDisabled(node)
+    return { ...node, disabled, children: applyPolicy(node.children, disabled) }
+  })
 }
 
 const tree = computed<DictTreeNode[]>(() => {
@@ -80,6 +97,7 @@ function selectedText(value: unknown): string {
     (part): part is string => !!part,
   )
   if (!dict.enabled) parts.push('（停用）')
+  else if (ancestorDisabled(dict)) parts.push('（上級停用）')
   return parts.join(' / ')
 }
 </script>

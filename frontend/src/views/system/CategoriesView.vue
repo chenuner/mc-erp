@@ -67,21 +67,25 @@ function selectGroup(code: string) {
   void loadItems()
 }
 
-const byId = computed(() => new Map(items.value.map((dict) => [dict.id, dict])))
 const childIds = computed(() => new Set(items.value.map((dict) => dict.parentId).filter((id): id is string => !!id)))
+const parentById = computed(() => new Map(items.value.map((dict) => [dict.id, dict])))
 
-/** 上級字典項；頂層回 null（上級被刪掉時也當頂層處理）。 */
-function parentRow(row: SysDictDto) {
-  return (row.parentId && byId.value.get(row.parentId)) || null
-}
-
-function hasChildren(row: SysDictDto) {
-  return childIds.value.has(row.id)
+/** 上級停用 = 整條分支都不再用；這裡找出第一個讓這一項失效的停用上級。 */
+function disabledAncestor(row: SysDictDto): SysDictDto | undefined {
+  const seen = new Set<string>([row.id])
+  let parentId = row.parentId
+  while (parentId && seen.add(parentId)) {
+    const parent = parentById.value.get(parentId)
+    if (!parent) return undefined
+    if (!parent.enabled) return parent
+    parentId = parent.parentId
+  }
+  return undefined
 }
 
 /**
  * 表格用樹形顯示（Element Plus 只認 children 欄位，所以在這裡掛上）。
- * 子項按識別碼「1.1、1.2」自然排序，父項按原來的排序。
+ * 同層先按手動排序、再看識別碼，上移/下移才會跟著動。
  */
 type TreeNode = SysDictDto & { children: TreeNode[] }
 
@@ -94,11 +98,16 @@ const treeItems = computed(() => {
     if (parent && parent !== row) parent.children.push(row)
     else roots.push(row)
   }
+  roots.sort(compareSiblings)
   for (const row of rows) {
-    if (row.children.length) row.children.sort((left, right) => compareCodes(left.value, right.value))
+    if (row.children.length) row.children.sort(compareSiblings)
   }
   return roots
 })
+
+function compareSiblings(left: TreeNode, right: TreeNode) {
+  return left.sort - right.sort || compareCodes(left.value, right.value)
+}
 
 function compareCodes(left: string, right: string) {
   return left.localeCompare(right, undefined, { numeric: true })
@@ -111,6 +120,8 @@ const expandAll = ref(true)
 const expandedIds = new Set<string>()
 /** 用戶手動收起的行（預設展開時才有意義）。 */
 const collapsedIds = new Set<string>()
+/** 程式碼正批次展開/收起的期間，忽略表格回報的 expand-change。 */
+let applyingExpansion = false
 
 function isExpanded(row: SysDictDto) {
   return expandAll.value ? !collapsedIds.has(row.id) : expandedIds.has(row.id)
@@ -122,29 +133,40 @@ function toggleExpanded(row: SysDictDto, expanded: boolean) {
   else bucket.add(row.id)
 }
 
-function setRowExpanded(row: SysDictDto, expanded: boolean) {
-  toggleExpanded(row, expanded)
-  tableRef.value?.toggleRowExpansion(row, expanded)
-}
-
 function trackExpand(row: SysDictDto, expanded: boolean) {
   // el-table 的 expand-change 回傳 (row, expanded)，直接以「這一行展開/收起」為準
+  if (applyingExpansion) return
   toggleExpanded(row, expanded)
 }
 
-/** 重新載入後表格資料換了，把手動折疊的行重新套用一次。 */
-async function restoreExpandedRows() {
-  await nextTick()
-  for (const item of treeItems.value) {
-    if (item.children.length && !isExpanded(item)) tableRef.value?.toggleRowExpansion(item, false)
-  }
+/** 樹形資料是巢狀的，展開要走到每一層的父節點。 */
+function flattenRows(nodes: TreeNode[]): TreeNode[] {
+  return nodes.flatMap((node) => [node, ...flattenRows(node.children)])
 }
 
-function applyExpandAll(value: string | number | boolean) {
+/** expanded 有值就整批展開或收起；不傳則按每一行記錄的手動狀態還原。 */
+async function applyRowExpansion(expanded?: boolean) {
+  const parents = flattenRows(treeItems.value).filter((row) => row.children.length)
+  applyingExpansion = true
+  // 收起時由深到淺，讓「收起全部」之後每一層都是收起的，而不是只收起最上層
+  for (const row of expanded === false ? parents.reverse() : parents) {
+    tableRef.value?.toggleRowExpansion(row, expanded ?? isExpanded(row))
+  }
+  await nextTick()
+  applyingExpansion = false
+}
+
+/** 重新載入後表格資料換了，把手動展開/收起的行重新套用一次。 */
+async function restoreExpandedRows() {
+  await nextTick()
+  await applyRowExpansion()
+}
+
+async function applyExpandAll(value: string | number | boolean) {
   expandAll.value = Boolean(value)
   expandedIds.clear()
   collapsedIds.clear()
-  void restoreExpandedRows()
+  await applyRowExpansion(Boolean(value))
 }
 
 async function refreshGroups() {
@@ -381,39 +403,66 @@ async function submitItem() {
 async function toggleEnabled(row: SysDictDto, enabled: boolean) {
   if (togglingIds.value.includes(row.id)) return
   togglingIds.value = [...togglingIds.value, row.id]
+  // 表格的 row 是樹形節點的副本，改它不會觸發重新渲染，要改回原始清單那一項
+  const target = items.value.find((item) => item.id === row.id)
+  const previous = target?.enabled
+  if (target) target.enabled = enabled
   try {
     const updated = await updateSysDict(row.id, { enabled })
-    row.enabled = updated.enabled
+    if (target) target.enabled = updated.enabled
     await refreshGroups()
   } catch {
-    /* 攔截器已提示 */
+    if (target && previous !== undefined) target.enabled = previous
   } finally {
     togglingIds.value = togglingIds.value.filter((id) => id !== row.id)
   }
 }
 
-function handleEnabledChange(row: SysDictDto, value: string | number | boolean) {
+async function handleEnabledChange(row: SysDictDto, value: string | number | boolean) {
   const enabled = Boolean(value)
   if (isRequiredDict(row) && !enabled) {
     ElMessage.warning('「待分類」是票據上傳流程必需項，不能停用')
     return
   }
-  void toggleEnabled(row, enabled)
+  // 停用上級 = 整條分支一起失效，先講清楚再動手（歷史資料不受影響）
+  if (!enabled && childIds.value.has(row.id)) {
+    try {
+      await ElMessageBox.confirm(
+        `停用「${row.label}」後，它底下的所有下級也一併不可選（已存的資料照樣顯示與查詢）。`,
+        '停用上級分類',
+        { confirmButtonText: '停用', cancelButtonText: '取消', type: 'warning' },
+      )
+    } catch {
+      return
+    }
+  }
+  await toggleEnabled(row, enabled)
+}
+
+/** 同一層的兄弟項：上移/下移只在同一層內換位，不會把子項搬去別的上級底下。 */
+function siblingsOf(row: SysDictDto) {
+  return orderedItems.value.filter((item) => (item.parentId ?? null) === (row.parentId ?? null))
 }
 
 function canMove(id: string, delta: number) {
   if (reordering.value || itemKeyword.value.trim() || statusFilter.value !== 'all') return false
-  const index = orderedItems.value.findIndex((item) => item.id === id)
+  const row = orderedItems.value.find((item) => item.id === id)
+  if (!row) return false
+  const siblings = siblingsOf(row)
+  const index = siblings.findIndex((item) => item.id === id)
   const target = index + delta
-  return index >= 0 && target >= 0 && target < orderedItems.value.length
+  return index >= 0 && target >= 0 && target < siblings.length
 }
 
 async function moveItem(row: SysDictDto, delta: number) {
   if (!canMove(row.id, delta)) return
+  const siblings = siblingsOf(row)
+  const otherId = siblings[siblings.findIndex((item) => item.id === row.id) + delta].id
+  // 後端按整組 id 的順序重排：在整份清單裡互換同層這兩項的位置即可
   const ids = orderedItems.value.map((item) => item.id)
-  const index = ids.indexOf(row.id)
-  const target = index + delta
-  ;[ids[index], ids[target]] = [ids[target], ids[index]]
+  const from = ids.indexOf(row.id)
+  const to = ids.indexOf(otherId)
+  ;[ids[from], ids[to]] = [ids[to], ids[from]]
   reordering.value = true
   try {
     await reorderSysDicts(selectedCode.value, ids)
@@ -503,11 +552,6 @@ onMounted(async () => {
           >
             <span class="group-name">{{ group.name }}</span>
             <span class="group-count">{{ group.itemCount }}</span>
-            <span v-if="group.isSystem" class="group-sub">
-              <span class="group-system">
-                <AppIcon name="lock" :size="11" />系統內建
-              </span>
-            </span>
           </button>
           <el-empty
             v-if="!groupsLoading && filteredGroups.length === 0"
@@ -565,7 +609,7 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- 有上級關係時用樹形顯示：地盤「牛房」底下掛「一樓」「二樓」 -->
+        <!-- 第一欄是標籤：Element Plus 的樹形縮進落在第一欄，這樣父子關係才看得出來 -->
         <el-table
           ref="tableRef"
           v-loading="itemsLoading"
@@ -573,10 +617,24 @@ onMounted(async () => {
           row-key="id"
           :default-expand-all="expandAll"
           :tree-props="{ children: 'children' }"
+          :indent="20"
           @expand-change="trackExpand"
         >
-          <el-table-column type="index" label="#" width="48" align="center" />
-          <el-table-column label="排序" width="80" align="center">
+          <el-table-column label="標籤" min-width="240">
+            <template #default="{ row }">
+              <span class="dict-label">
+                <span :class="{ 'dict-parent': row.children.length }">{{ row.label }}</span>
+                <el-tag v-if="isRequiredDict(row)" size="small" type="warning" effect="plain">上傳必需</el-tag>
+                <el-tooltip v-if="disabledAncestor(row)" content="上級已停用，這一項也一併不可選" placement="top">
+                  <el-tag size="small" type="info" effect="plain">上級停用</el-tag>
+                </el-tooltip>
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="識別碼" width="100">
+            <template #default="{ row }"><span class="dict-code">{{ row.value }}</span></template>
+          </el-table-column>
+          <el-table-column label="排序" width="64" align="center">
             <template #default="{ row }">
               <div class="sort-buttons">
                 <el-button link type="primary" :disabled="!canMove(row.id, -1)" aria-label="上移" title="上移" @click="moveItem(row, -1)">
@@ -588,24 +646,12 @@ onMounted(async () => {
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="標籤" min-width="200">
+          <el-table-column label="備註" min-width="140" show-overflow-tooltip>
             <template #default="{ row }">
-              <div class="dict-label">
-                {{ row.label }}
-                <el-tag v-if="isRequiredDict(row)" size="small" type="warning" effect="plain">上傳必需</el-tag>
-                <el-tag v-if="hasChildren(row)" size="small" type="info" effect="plain">上級</el-tag>
-              </div>
-              <div class="dict-code">
-                識別碼 {{ row.value }}
-                <span v-if="row.parentId" class="dict-sub">· 下級 {{ parentRow(row)?.label ?? '（上級已刪）' }} 的下級</span>
-                <span v-else-if="selectedGroup.isSystem" class="dict-lock">· 識別碼不可改</span>
-              </div>
+              <span :class="{ 'cell-empty': !row.remark }">{{ row.remark || '—' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="備註" min-width="120">
-            <template #default="{ row }">{{ row.remark || '—' }}</template>
-          </el-table-column>
-          <el-table-column label="狀態" width="100" align="center">
+          <el-table-column label="狀態" width="90" align="center">
             <template #default="{ row }">
               <el-switch
                 :model-value="row.enabled"
@@ -852,24 +898,6 @@ onMounted(async () => {
   color: var(--mc-primary);
 }
 
-.group-sub {
-  display: flex;
-  grid-column: 1 / -1;
-  align-items: center;
-  gap: 8px;
-  margin-top: 3px;
-  color: var(--mc-text-secondary);
-  font-size: 12px;
-}
-
-.group-system {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 3px;
-  color: var(--mc-primary);
-}
-
 .items-panel {
   display: flex;
   flex-direction: column;
@@ -925,10 +953,15 @@ onMounted(async () => {
 }
 
 .dict-label {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-weight: 500;
+  font-weight: 400;
+}
+
+/* 有下級的項加粗，配合縮進一眼看出層級 */
+.dict-parent {
+  font-weight: 600;
 }
 
 .sort-buttons {
@@ -943,22 +976,12 @@ onMounted(async () => {
 }
 
 .dict-code {
-  margin-top: 2px;
   color: var(--mc-text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
-/* 子行的縮進稍寬一點，讓「誰是誰的下級」一眼看得出來 */
-:deep(.el-table__indent) {
-  padding-right: 6px !important;
-}
-
-.dict-lock {
-  color: var(--mc-primary);
-}
-
-.dict-sub {
+.cell-empty {
   color: var(--mc-text-secondary);
 }
 

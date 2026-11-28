@@ -61,6 +61,7 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
         {
             e.ToTable("identity_users");
             e.HasIndex(u => u.Username).IsUnique();
+            e.Property(u => u.IsProtected).HasDefaultValue(false);
             e.HasQueryFilter(u => !u.IsDeleted);
             e.HasMany(u => u.UserRoles)
                 .WithOne(ur => ur.User)

@@ -12,7 +12,7 @@ export interface DictTreeNode {
 /**
  * 把同一分組的字典項排成樹：有上級的項掛在上級底下，其餘當根節點。
  * 上級不在這批資料裡（被刪或沒載入）就當根節點，不能讓它憑空消失。
- * 同層按識別碼自然順序排，1.1 排在 1.2 前、1.10 排在 1.9 後。
+ * 同層先按用戶調過的排序值，再看識別碼自然順序（1.1 排在 1.2 前、1.10 排在 1.9 後）。
  */
 export function dictTree(dicts: SysDictDto[]): DictTreeNode[] {
   const byId = new Map(dicts.map((dict) => [dict.id, dict]))
@@ -23,7 +23,7 @@ export function dictTree(dicts: SysDictDto[]): DictTreeNode[] {
     siblings.push(dict)
     childrenOf.set(parentId, siblings)
   }
-  for (const siblings of childrenOf.values()) siblings.sort((left, right) => compareCode(left.value, right.value))
+  for (const siblings of childrenOf.values()) siblings.sort(compareSiblings)
 
   const build = (parentId: string | null, ancestors: ReadonlySet<string>): DictTreeNode[] =>
     (childrenOf.get(parentId) ?? [])
@@ -50,6 +50,11 @@ function attachedParentId(dict: SysDictDto, byId: Map<string, SysDictDto>): stri
     parentId = parent.parentId
   }
   return dict.parentId
+}
+
+/** 同層排序：先看手動排序值，再看識別碼（1.1 在 1.2 前、1.10 在 1.9 後）。 */
+function compareSiblings(left: SysDictDto, right: SysDictDto): number {
+  return left.sort - right.sort || compareCode(left.value, right.value)
 }
 
 /** 「1.10」要排成 1.10 而不是字串排序的 1.10 < 1.9，所以逐段比較數字。 */

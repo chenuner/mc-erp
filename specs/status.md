@@ -18,7 +18,7 @@
 | Attendance | 薪酬按「員工 × 職位 × 地盤」分組（一行一個組合），打卡明細帶職位和地盤，可逐日換 | ✅ 可用 | `AttendanceTableService.RecomputePayrollAsync` |
 | Attendance | 改打卡明細後自動重算該月薪酬（只有時間 / O.T. / 勞工假 / 職位 / 地盤變動才觸發，只改備註不觸發；跨月時兩個月都重算） | ✅ 可用 | `PUT /api/attendance/punches/{id}` |
 | Attendance | 員工（工人）管理：新增、編輯（姓名／工號／職位分類／日薪／在職，職位分類可選）、停用、刪除（軟刪除）；薪酬表與打卡明細的姓名篩選是員工下拉；職位分類在系統字典 `AttendancePosition` 維護，SeedData 只預置「樓面員工」，不回填現有員工 | ✅ 可用（僅 Admin，入口在考勤薪酬頁） | `AttendanceServices` / `DELETE /api/attendance/workers/{id}` |
-| Attendance | 地盤：和會計票據共用系統字典 `AccountingSiteCategory`（「系統字典 → 地盤分類」維護，不再有獨立地盤表或 `/attendance/sites` 端點）；地盤可分層（牛房 → 一樓 / 二樓），下拉用樹形結構（`DictTreeSelect`），選中後顯示「牛房 / 一樓」；考勤卡同步時從這裡選地盤，停用不出現在下拉，已被打卡明細或票據引用時不能刪除 | ✅ 可用（字典頁，僅 Admin） | `SysDictService` / `POST /api/system/dicts` |
+| Attendance | 地盤：和會計票據共用系統字典 `AccountingSiteCategory`（「系統字典 → 地盤分類」維護，不再有獨立地盤表或 `/attendance/sites` 端點）；地盤可分層（牛房 → 一樓 / 二樓），下拉用樹形結構（`DictTreeSelect`），選中後顯示「牛房 / 一樓」；上級停用時下級一併不可選（歷史資料照舊）；考勤卡同步時從這裡選地盤，停用不出現在下拉，已被打卡明細或票據引用時不能刪除 | ✅ 可用（字典頁，僅 Admin） | `SysDictService` / `POST /api/system/dicts` |
 | Attendance | 計薪（工數、MPF、OT、實付人工） | ✅ 由考勤卡同步或改打卡明細時按 `AttendanceRules` 重算「一個員工一個月的一個職位×地盤組合」；未做全月一鍵重算、沒有定時任務 | `AttendanceTableService.RecomputePayrollAsync` |
 | Attendance | 外部打卡 API 同步 | ❌ 未實現 | — |
 | Attendance | 考勤卡照片掃描（prebuilt-layout → 逐行打卡並落庫，每欄帶置信度；手寫年月姓名不計入複核，可雙擊人工修正；兩步流程：先「標記為已核對」，成功後才出現「同步」，按「同步」導入打卡明細並重算該員工該月薪酬；未核對不能同步，改過內容要重新按「標記為已核對」） | ✅ 可用（與票據共用 Azure 憑據，需配置才啟用） | `POST /api/attendance/scan`、`GET /api/attendance/scans`、`PUT /api/attendance/scans/{id}`、`POST /api/attendance/scans/{id}/confirm`、`POST /api/attendance/scans/{id}/sync` |
@@ -26,7 +26,7 @@
 | Storage | 本地文件上傳 / 下載 / 刪除、MD5、**按 MD5 去重**（同內容共用一個物理文件，最後一筆記錄刪掉時才刪磁盤）；文件類別篩選**選上級連同下級一起算** | ✅ 可用 | `FileService` |
 | Storage | 按地盤 / 帳戶的檔案權限（FilePermission） | ❌ 未實現，目前只有 Admin / 非 Admin 粗粒度 | — |
 | Storage | 上傳類別的限制 | ⚠️ 只擋了「Accounting 分組需 Admin」，其餘分組任何已登入用戶都能上傳；是否需要更嚴的白名單待定 | `FileService.上传Async` |
-| System | 系統字典：分組管理 + 字典項 CRUD，字典值自動編號、可調整排序；**字典項支援上級（`ParentId`）**，同分組內多層（地盤「牛房 → 一樓 / 二樓」），識別碼按層級自動編成 1、1.1、1.1.1，換上級自動重新編號；接口不重複返回字典名稱，前端按 id 映射（`dictText()`） | ✅ 可用（字典頁樹形顯示；會計票據、考勤地盤／職位、文件庫類別、字典上級一律用樹形下拉 `DictTreeSelect`） | `SysDictGroupService` / `SysDictService` / `frontend/src/utils/dicts.ts` / `frontend/src/components/DictTreeSelect.vue` |
+| System | 系統字典：分組管理 + 字典項 CRUD，字典值自動編號、可調整排序；**字典項支援上級（`ParentId`）**，同分組內多層（地盤「牛房 → 一樓 / 二樓」），識別碼按層級自動編成 1、1.1、1.1.1，換上級自動重新編號；上級停用時下級一併不可選（`EnsureEnabledAsync`，歷史資料不受影響）；接口不重複返回字典名稱，前端按 id 映射（`dictText()`） | ✅ 可用（字典頁樹形顯示；會計票據、考勤地盤／職位、文件庫類別、字典上級一律用樹形下拉 `DictTreeSelect`） | `SysDictGroupService` / `SysDictService` / `frontend/src/utils/dicts.ts` / `frontend/src/components/DictTreeSelect.vue` |
 | 前端 | 登入、工作台、考勤、會計、文件、字典、用戶頁 | ✅ 可用 | `frontend/src/views` |
 
 ---

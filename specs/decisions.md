@@ -16,7 +16,7 @@
 
 > 每條都寫清楚「選了會發生什麼、代價、我會改哪些檔案」，你只要回 1 / 2 / 3。
 > 我的推薦排在第一位，並標了推薦理由。
-> 對應問題細節見 [review-notes.md](./review-notes.md)。
+> 對應問題細節見 [docs/archive/review-notes-2026-11-22.md](../docs/archive/review-notes-2026-11-22.md)。
 
 ---
 

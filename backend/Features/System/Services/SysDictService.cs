@@ -40,6 +40,29 @@ public sealed class SysDictService(ISysDictRepository repo, ISysDictGroupReposit
         return ids;
     }
 
+    /// <summary>
+    /// 寫入用：分類必須存在、屬於指定分組、自己啟用，而且每個上級都啟用。
+    /// 上級停用代表整條分支都不再使用，所以下級一併不可選（歷史資料照樣顯示，不影響查詢與匯出）。
+    /// </summary>
+    public async Task<SysDict> EnsureEnabledAsync(Guid id, string? groupName, string message,
+        CancellationToken ct = default)
+    {
+        var dict = await repo.GetByIdAsync(id, ct);
+        if (dict is null || !dict.Enabled || (groupName is not null && dict.GroupName != groupName))
+            throw new InvalidOperationException(message);
+
+        var byId = (await repo.ListByGroupAsync(dict.GroupName, ct)).ToDictionary(item => item.Id);
+        var seen = new HashSet<Guid> { dict.Id };
+        var parentId = dict.ParentId;
+        while (parentId is Guid current && seen.Add(current) && byId.TryGetValue(current, out var parent))
+        {
+            if (!parent.Enabled)
+                throw new InvalidOperationException($"上級分類「{parent.Label}」已停用，請先啟用上級或改選其他分類");
+            parentId = parent.ParentId;
+        }
+        return dict;
+    }
+
     public async Task<SysDict> CreateAsync(string groupName, string label, string? value = null, int? sort = null,
         bool? enabled = null, string? remark = null, Guid? parentId = null, CancellationToken ct = default)
     {

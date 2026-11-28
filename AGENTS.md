@@ -61,6 +61,9 @@ MC ERP — 香港建築管理公司 ERP 系統。簡單系統，不過度工程�
 | 整合檢查（需資料庫） | `dotnet run --project tests/Accounting.Checks/Accounting.Checks.csproj -c Release -- --integration` |
 | 前端型別 + 建置 | `pnpm -C frontend run build` |
 | 前端純函數檢查（裁剪 / 字典層級） | `pnpm -C frontend run check` |
+| 倉庫清理 | `pwsh -File scripts/clean.ps1`（默認只掃描；加 `-Apply` 才刪） |
+
+> 清理倉庫時：先跑一次不帶參數的 `scripts/clean.ps1` 看清單，只刪「能重新建出來」的東西（構建產物、臨時目錄、日誌、`scripts/clean.ps1` 的 Basic 段）。`backend/storage-files`（已上傳檔案本體）、`mc-erp-temp`（後端 TMP）、`appsettings*.json`、`backend/Migrations`、`backend/storage-files` 相關資料一律不刪；刪完跑 `scripts/check.ps1`。
 
 > 三個 Checks 共用 `backend` 的 Release 輸出，**不可並行**，否則 CS2012。
 >

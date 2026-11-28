@@ -389,6 +389,21 @@ internal static class IntegrationChecks
                 Check(archive.Entries.Count == 1, "export includes descendant categories by default");
             using (var exact = await client.GetAsync($"accounting/receipts/export?siteCategoryDictId={siteParentId}&includeDescendants=false"))
                 Check(exact.StatusCode == HttpStatusCode.NotFound, "export without descendants only takes the exact category");
+            // 上級停用 = 整條分支都不再用：下級不可選，但已存的資料照樣查得到
+            using (var disableParent = await client.PutAsJsonAsync($"system/dicts/{siteParentId}", new { enabled = false }))
+                disableParent.EnsureSuccessStatusCode();
+            var blocked = await Upload(documentId, png);
+            using (var blockedSave = await client.PutAsJsonAsync($"accounting/receipts/{blocked.Id}",
+                new UpdateReceiptRequest(blocked.Version, documentId, pendingId,
+                    siteChild.GetProperty("id").GetGuid(), new DateOnly(2026, 4, 2), 10m, "HKD", null, null, null)))
+            {
+                Check(blockedSave.StatusCode == HttpStatusCode.BadRequest, "child of a disabled parent cannot be saved");
+                Check((await blockedSave.Content.ReadAsStringAsync()).Contains("上級分類"), "disabled ancestor is named in the error");
+            }
+            var history = await Get($"accounting/receipts?siteCategoryDictId={siteParentId}");
+            Check(history.GetProperty("total").GetInt32() == 1, "history under a disabled parent is still listed");
+            using (var enableParent = await client.PutAsJsonAsync($"system/dicts/{siteParentId}", new { enabled = true }))
+                enableParent.EnsureSuccessStatusCode();
             using (var deleteEmptyGroup = await client.DeleteAsync($"system/dict-groups/{customGroupId}"))
                 Check(deleteEmptyGroup.StatusCode == HttpStatusCode.NoContent, "empty group can be deleted");
             File.Delete(Directory.GetFiles(temporaryRoot).First());

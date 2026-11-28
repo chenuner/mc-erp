@@ -3,7 +3,7 @@ using MC.Erp.Features.Identity.Repositories;
 
 namespace MC.Erp.Features.Identity.Services;
 
-public sealed class RoleService(IRoleRepository roleRepo)
+public sealed class RoleService(IRoleRepository roleRepo, IUserRepository userRepo)
 {
     public async Task<Role> CreateAsync(string name, string? description, CancellationToken ct = default)
     {
@@ -45,9 +45,19 @@ public sealed class RoleService(IRoleRepository roleRepo)
     public Task<(List<Role> Items, int Total)> ListAsync(int page, int pageSize, CancellationToken ct = default)
         => roleRepo.ListAsync(page, pageSize, ct);
 
+    public Task<List<string>> GetRoleNamesAsync(Guid userId, CancellationToken ct = default)
+        => roleRepo.GetRoleNamesAsync(userId, ct);
+
     public async Task AssignToUserAsync(Guid userId, Guid roleId, CancellationToken ct = default)
         => await roleRepo.AssignToUserAsync(userId, roleId, ct);
 
     public async Task RemoveFromUserAsync(Guid userId, Guid roleId, CancellationToken ct = default)
-        => await roleRepo.RemoveFromUserAsync(userId, roleId, ct);
+    {
+        var role = await roleRepo.GetByIdAsync(roleId, ct);
+        var user = await userRepo.GetByIdAsync(userId, ct);
+        if (role?.Name == "Admin" && user?.IsProtected == true)
+            throw new InvalidOperationException("主管理員帳號不可移除 Admin 角色");
+
+        await roleRepo.RemoveFromUserAsync(userId, roleId, ct);
+    }
 }

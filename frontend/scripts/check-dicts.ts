@@ -40,6 +40,14 @@ const many = [dict('a', 'A', '1'), ...Array.from({ length: 10 }, (_, index) => d
 const manyCodes = dictTree(many)[0].children.map((node) => node.sysDict?.value)
 check(manyCodes.at(-1) === '1.10', 'numeric code segments sort numerically not alphabetically')
 
+// 用戶調過排序值時，同層以 Sort 為先、識別碼為後（1.2 排在 1.1 前面）
+const reordered = [
+  dict('barn', '牛房', '1'),
+  { ...dict('floor1', '一樓', '1.1', 'barn'), sort: 2 },
+  { ...dict('floor2', '二樓', '1.2', 'barn'), sort: 1 },
+]
+check(flatten(dictTree(reordered)).join(',') === '1@0,1.2@1,1.1@1', 'manual sort wins over the code inside one level')
+
 // 上級被停用／不存在時，下級仍要列出來，不能憑空消失
 const orphan = dictTree([dict('lost-child', '一樓', '1.1', 'missing')])
 check(orphan.length === 1 && orphan[0].label === '一樓', 'child with missing parent becomes a root node')

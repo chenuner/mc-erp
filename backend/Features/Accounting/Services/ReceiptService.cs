@@ -49,11 +49,7 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
     private async Task<Receipt> FindTrackedAsync(Guid id) => await repo.FindTrackedAsync(id) ?? throw new KeyNotFoundException("票據不存在");
 
     private async Task<SysDict> DictAsync(Guid id, string group)
-    {
-        var dict = await dicts.GetByIdAsync(id);
-        if (dict is null || !dict.Enabled || dict.GroupName != group) throw new InvalidOperationException("請選擇有效且啟用的分類");
-        return dict;
-    }
+        => await dicts.EnsureEnabledAsync(id, group, "請選擇有效且啟用的分類");
 
     public async Task<ReceiptDetail> CreateAsync(Guid documentTypeDictId)
     {

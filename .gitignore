@@ -27,6 +27,8 @@ frontend/dist/
 
 # IDE
 .idea/
+.vscode/
+.codebuddy/
 *.swp
 *~
 

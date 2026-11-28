@@ -98,7 +98,9 @@ public static class SeedData
             Username = "admin",
             PasswordHash = hasher.Hash(initialAdminPassword),
             DisplayName = "系統管理員",
-            IsActive = true
+            IsActive = true,
+            // 主管理員受保護：不可刪除、不可停用、不可移除 Admin 角色，運維帳號永遠存在
+            IsProtected = true
         };
         db.Users.Add(admin);
 

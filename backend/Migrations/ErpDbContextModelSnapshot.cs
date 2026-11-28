@@ -494,6 +494,11 @@ namespace MC.Erp.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsProtected")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasColumnType("text");

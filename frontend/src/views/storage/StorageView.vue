@@ -366,7 +366,7 @@ onMounted(async () => {
         clearable
         placeholder="按文件類別篩選"
         aria-label="文件類別"
-        style="width: 280px"
+        style="width: 600px"
       />
 
       <div class="toolbar-spacer" />
@@ -483,7 +483,8 @@ onMounted(async () => {
     >
       <el-form label-position="top">
         <el-form-item label="文件類別" required>
-          <DictTreeSelect v-model="uploadType" :dicts="enabledDicts" :groups="dictGroups" placeholder="選擇系統字典項" :disabled="uploading" />
+          <!-- 傳全量字典：停用項要留在樹裡當「灰色不可選」，否則上級停用時下級會被當成頂層、結構亂掉 -->
+          <DictTreeSelect v-model="uploadType" :dicts="dicts" :groups="dictGroups" placeholder="選擇系統字典項" :disabled="uploading" />
         </el-form-item>
         <el-form-item label="文件">
           <el-upload

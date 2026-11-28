@@ -50,8 +50,3 @@ export async function deleteFile(id: string): Promise<void> {
 export async function getFileBlob(id: string): Promise<Blob> {
   return (await request.get(`/storage/files/${id}/download`, { responseType: 'blob' })) as unknown as Blob
 }
-
-/** 按內容（MD5）取文件；上傳已按 MD5 去重，同一個摘要的物理文件唯一。 */
-export async function getFileBlobByMd5(md5: string): Promise<Blob> {
-  return (await request.get(`/storage/files/by-md5/${encodeURIComponent(md5)}/download`, { responseType: 'blob' })) as unknown as Blob
-}

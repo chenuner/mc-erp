@@ -22,9 +22,7 @@ public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentU
     public async Task<FileItem> 上传Async(Guid type, string originalName, string contentType, long sizeBytes, Stream content, CancellationToken ct = default)
     {
         ct = context.HttpContext?.RequestAborted ?? ct;
-        var dict = await dictService.GetByIdAsync(type, ct);
-        if (dict is null || !dict.Enabled)
-            throw new InvalidOperationException("請選擇有效且啟用的文件類別");
+        var dict = await dictService.EnsureEnabledAsync(type, null, "請選擇有效且啟用的文件類別", ct);
         if (dict.GroupName == "Accounting" && !user.IsInRole("Admin")) throw new UnauthorizedAccessException();
 
         var saved = await storage.SaveAsync(content, originalName, ct);
@@ -117,8 +115,7 @@ public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentU
     {
         if (!user.IsInRole("Admin")) throw new UnauthorizedAccessException();
         var ct = context.HttpContext?.RequestAborted ?? default;
-        var dict = await dictService.GetByIdAsync(type, ct);
-        if (dict is null || !dict.Enabled || dict.GroupName != "Accounting") throw new InvalidOperationException("請選擇有效支出分類");
+        var dict = await dictService.EnsureEnabledAsync(type, "Accounting", "請選擇有效支出分類", ct);
         var file = await db.FileItems.Include(item => item.TypeDict).FirstOrDefaultAsync(item => item.Id == id, ct);
         if (file?.TypeDict?.GroupName != "Accounting") throw new InvalidOperationException("會計圖片不存在");
         file.Type = dict.Id;
