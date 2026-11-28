@@ -8,6 +8,8 @@ export interface SysDictDto {
   sort: number
   enabled: boolean
   remark: string | null
+  /** 上級字典項 ID；null 表示頂層（例如地盤「牛房」底下的「一樓」） */
+  parentId: string | null
 }
 
 export interface SysDictGroupDto {
@@ -31,11 +33,13 @@ export interface PagedResult<T> {
 export interface CreateSysDictRequest {
   groupName: string
   label: string
-  /** 留空時後端會自動生成 1、2、3… 的識別碼 */
+  /** 留空時後端會自動生成 1、2、3… 的識別碼（有上級時為 1.1、1.2…） */
   value?: string
   sort?: number
   enabled?: boolean
   remark?: string | null
+  /** 上級字典項 ID，省略為頂層 */
+  parentId?: string | null
 }
 
 export interface CreateSysDictGroupRequest {

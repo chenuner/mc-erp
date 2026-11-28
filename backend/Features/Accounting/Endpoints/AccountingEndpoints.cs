@@ -33,10 +33,11 @@ public static class AccountingEndpoints
         });
         group.MapPost("/receipts/{id:guid}/image", async (Guid id, IFormFile file, ReceiptService service) =>
             TypedResults.Ok(ReceiptResponse.From(await service.AttachImageAsync(id, file)))).DisableAntiforgery();
-        group.MapGet("/receipts/export", async (Guid? documentTypeDictId, Guid? type,
-            Guid? siteCategoryDictId, DateOnly? start, DateOnly? end, ReceiptService service) =>
+        group.MapGet("/receipts/export", async (ReceiptService service, Guid? documentTypeDictId, Guid? type,
+            Guid? siteCategoryDictId, DateOnly? start, DateOnly? end, bool includeDescendants = true) =>
         {
-            var archive = await service.ExportAsync(Filter(documentTypeDictId, type, siteCategoryDictId, start, end));
+            var archive = await service.ExportAsync(
+                Filter(documentTypeDictId, type, siteCategoryDictId, start, end), includeDescendants);
             return TypedResults.File(archive.Content, "application/zip", archive.Name);
         });
         group.MapGet("/receipts/{id:guid}", async (Guid id, ReceiptService service) => TypedResults.Ok(ReceiptResponse.From(await service.FindAsync(id))));
@@ -66,8 +67,11 @@ public static class AccountingEndpoints
         DateOnly? start, DateOnly? end)
     {
         if (start > end) throw new InvalidOperationException("開始日期不能晚於結束日期");
-        return new(documentType, type, siteCategory, start, end);
+        // 單一 id 包成清單；要不要擴張成「自己 + 子樹」由 ReceiptService.ExpandFilterAsync 決定
+        return new(Ids(documentType), Ids(type), Ids(siteCategory), start, end);
     }
+
+    private static List<Guid>? Ids(Guid? id) => id is null ? null : [id.Value];
 }
 
 public sealed record CreateReceiptRequest(Guid DocumentTypeDictId);
@@ -75,31 +79,31 @@ public sealed record CreateReceiptRequest(Guid DocumentTypeDictId);
 /// <summary>識別接口的回應：票據本體（詳情口徑）＋本次識別建議。</summary>
 public sealed record RecognizeResponse(ReceiptResponse Receipt, OcrSuggestion Fields);
 
-/// <summary>列表一行：只有票據欄位。OCR 原文和識別建議不在型別裡，打開詳情再拿。</summary>
+/// <summary>列表一行：只有票據欄位。OCR 原文和識別建議不在型別裡，打開詳情再拿；字典名稱由前端按 id 映射。</summary>
 public sealed record ReceiptListResponse(Guid Id, Guid Version, Guid? FileItemId, string? FileName, string? Md5,
-    long? SizeBytes, Guid DocumentTypeDictId, string DocumentTypeLabel,
-    Guid Type, string TypeLabel, Guid? SiteCategoryDictId, string? SiteCategoryLabel,
+    long? SizeBytes, Guid DocumentTypeDictId,
+    Guid Type, Guid? SiteCategoryDictId,
     DateOnly? ReceiptDate, decimal? Amount, string? CurrencyCode, string? MerchantName,
     string? InvoiceNumber, string? Remark, string OcrStatus, string? OcrError)
 {
     public static ReceiptListResponse From(ReceiptListItem item) => new(item.Id, item.Version,
         item.FileItemId, item.FileName, item.Md5, item.SizeBytes,
-        item.DocumentTypeDictId, item.DocumentTypeLabel, item.Type, item.TypeLabel,
-        item.SiteCategoryDictId, item.SiteCategoryLabel, item.ReceiptDate, item.Amount, item.CurrencyCode,
+        item.DocumentTypeDictId, item.Type,
+        item.SiteCategoryDictId, item.ReceiptDate, item.Amount, item.CurrencyCode,
         item.MerchantName, item.InvoiceNumber, item.Remark, item.OcrStatus, item.OcrError);
 }
 
 public sealed record ReceiptResponse(Guid Id, Guid Version, Guid? FileItemId, string? FileName, string? Md5,
-    long? SizeBytes, Guid DocumentTypeDictId, string DocumentTypeLabel,
-    Guid Type, string TypeLabel, Guid? SiteCategoryDictId, string? SiteCategoryLabel,
+    long? SizeBytes, Guid DocumentTypeDictId,
+    Guid Type, Guid? SiteCategoryDictId,
     DateOnly? ReceiptDate, decimal? Amount, string? CurrencyCode, string? MerchantName,
     string? InvoiceNumber, string? Remark, string OcrStatus, string? OcrError,
     string? OcrText, OcrSuggestion? OcrResult)
 {
     public static ReceiptResponse From(ReceiptDetail detail) => new(detail.Id, detail.Version,
         detail.FileItemId, detail.FileName, detail.Md5, detail.SizeBytes,
-        detail.DocumentTypeDictId, detail.DocumentTypeLabel, detail.Type, detail.TypeLabel,
-        detail.SiteCategoryDictId, detail.SiteCategoryLabel, detail.ReceiptDate, detail.Amount, detail.CurrencyCode,
+        detail.DocumentTypeDictId, detail.Type,
+        detail.SiteCategoryDictId, detail.ReceiptDate, detail.Amount, detail.CurrencyCode,
         detail.MerchantName, detail.InvoiceNumber, detail.Remark, detail.OcrStatus, detail.OcrError,
         detail.OcrText, ReadSuggestion(detail.OcrResultJson));
 

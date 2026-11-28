@@ -344,8 +344,8 @@ var workerDto = WorkerDto.From(new Worker
     Name = totalsWorker.Name, DailyWage = totalsWorker.DailyWage,
     PositionDictId = floorPosition.Id, Position = floorPosition
 });
-Check(workerDto.Position == "樓面員工" && workerDto.PositionId == floorPosition.Id,
-    "Worker keeps the optional position category");
+Check(workerDto.PositionId == floorPosition.Id,
+    "Worker keeps the optional position category id (label is mapped on the frontend)");
 using var totalsJson = JsonDocument.Parse(JsonSerializer.Serialize(payrollPage, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
 var totalsNode = totalsJson.RootElement.GetProperty("totals");
 Check(totalsNode.GetProperty("workDays").GetDecimal() == 22m && totalsNode.GetProperty("totalAmount").GetDecimal() == 22946.88m,

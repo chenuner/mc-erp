@@ -66,4 +66,7 @@ public sealed class RoleRepository(ErpDbContext db) : IRoleRepository
             .Select(ur => ur.Role.Name)
             .ToListAsync(ct);
     }
+
+    public Task<bool> HasRoleAsync(Guid userId, string roleName, CancellationToken ct = default)
+        => db.UserRoles.AnyAsync(ur => ur.UserId == userId && ur.Role.Name == roleName, ct);
 }

@@ -4,6 +4,7 @@ using MC.Erp.Common.Errors;
 using MC.Erp.Common.Security;
 using MC.Erp.Features.Identity.Services;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace MC.Erp.Features.Identity.Endpoints;
 
@@ -14,8 +15,8 @@ public static class IdentityEndpoints
         var group = app.MapGroup("/api/identity").WithTags("Identity");
         group.AddEndpointFilter<ExceptionProblemFilter>();
 
-        // 登錄
-        group.MapPost("/login", LoginAsync);
+        // 登錄（按客戶端 IP 限流：每分鐘 20 次，超出回 429）
+        group.MapPost("/login", LoginAsync).RequireRateLimiting(LoginRateLimit.Policy);
 
         // 用戶管理
         group.MapGet("/users", ListUsersAsync).RequireAuthorization("admin");
@@ -45,12 +46,15 @@ public static class IdentityEndpoints
     }
 
     private static async Task<Ok<PagedResult<UserDto>>> ListUsersAsync(
-        UserService svc, int page = 1, int pageSize = 20, CancellationToken ct = default)
+        UserService svc, RoleService roles, int page = 1, int pageSize = 20, CancellationToken ct = default)
     {
         var (items, total) = await svc.ListAsync(page, pageSize, ct);
-        return TypedResults.Ok(new PagedResult<UserDto>(
-            items.Select(u => new UserDto(u.Id, u.Username, u.Email, u.DisplayName, u.IsActive)).ToList(),
-            total, page, pageSize));
+        // 用戶列表要靠角色判斷「管理員帳號不可刪」，所以把角色名一併帶回前端
+        var users = new List<UserDto>(items.Count);
+        foreach (var u in items)
+            users.Add(new UserDto(u.Id, u.Username, u.Email, u.DisplayName, u.IsActive, u.IsProtected,
+                await roles.GetRoleNamesAsync(u.Id, ct)));
+        return TypedResults.Ok(new PagedResult<UserDto>(users, total, page, pageSize));
     }
 
     private static async Task<Created<UserDto>> CreateUserAsync(
@@ -58,16 +62,17 @@ public static class IdentityEndpoints
     {
         var user = await svc.CreateAsync(req.Username, req.Password, req.Email, req.DisplayName, ct);
         return TypedResults.Created($"/api/identity/users/{user.Id}",
-            new UserDto(user.Id, user.Username, user.Email, user.DisplayName, user.IsActive));
+            new UserDto(user.Id, user.Username, user.Email, user.DisplayName, user.IsActive, user.IsProtected, []));
     }
 
     private static async Task<Results<Ok<UserDto>, NotFound>> UpdateUserAsync(
-        Guid id, UpdateUserRequest req, UserService svc, CancellationToken ct)
+        Guid id, UpdateUserRequest req, UserService svc, RoleService roles, CancellationToken ct)
     {
         var user = await svc.UpdateAsync(id, req.Email, req.DisplayName, req.IsActive, ct);
         return user is null
             ? TypedResults.NotFound()
-            : TypedResults.Ok(new UserDto(user.Id, user.Username, user.Email, user.DisplayName, user.IsActive));
+            : TypedResults.Ok(new UserDto(user.Id, user.Username, user.Email, user.DisplayName, user.IsActive,
+                user.IsProtected, await roles.GetRoleNamesAsync(user.Id, ct)));
     }
 
     private static async Task<Results<NoContent, NotFound>> DeleteUserAsync(
@@ -143,5 +148,5 @@ public sealed record UpdateUserRequest(string? Email, string? DisplayName, bool?
 public sealed record ResetPasswordRequest([Required] string NewPassword);
 public sealed record CreateRoleRequest([Required] string Name, string? Description);
 public sealed record UpdateRoleRequest(string? Name, string? Description);
-public sealed record UserDto(Guid Id, string Username, string? Email, string? DisplayName, bool IsActive);
+public sealed record UserDto(Guid Id, string Username, string? Email, string? DisplayName, bool IsActive, bool IsProtected, List<string> Roles);
 public sealed record RoleDto(Guid Id, string Name, string? Description);

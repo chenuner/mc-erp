@@ -3,7 +3,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import { ElLoading, ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import AppIcon from '@/components/AppIcon.vue'
 import ImageCropDialog from '@/components/ImageCropDialog.vue'
+import DictTreeSelect from '@/components/DictTreeSelect.vue'
 import { MAX_UPLOAD_BYTES } from '@/utils/cropImage'
+import { dictText } from '@/utils/dicts'
 import { useAuthStore } from '@/stores/auth'
 import { listSysDictsByGroup, type SysDictDto } from '@/api/system'
 import { accountingStatus, listReceipts, getReceipt, createReceipt, attachReceiptImage, recognizeReceipt,
@@ -38,6 +40,8 @@ const exportForm = reactive({
   documentTypeDictId: '',
   type: '',
   dates: null as [string, string] | null,
+  /** 選上級時連同下級分類一起提取；列表篩選一律含下級，只有導出才給開關。 */
+  includeDescendants: true,
 })
 const exportRules: FormRules = {
   siteCategoryDictId: [{ required: true, message: '請選擇地盤分類', trigger: 'change' }],
@@ -60,6 +64,11 @@ const ocrReview = ref<string[]>([])
 const formRef = ref<FormInstance>()
 const form = reactive<UpdateReceipt>({ version: '', documentTypeDictId: '', type: '', siteCategoryDictId: null,
   receiptDate: null, amount: null, currencyCode: null, merchantName: null, invoiceNumber: null, remark: null })
+/** 地盤下拉用空字串表示「沒選」，存檔時再轉成 null，和後端約定一致。 */
+const formSiteCategoryId = computed({
+  get: () => form.siteCategoryDictId ?? '',
+  set: (value: string) => { form.siteCategoryDictId = value || null },
+})
 const rules: FormRules = {
   documentTypeDictId: [{ required: true, message: '請選擇票據類型', trigger: 'change' },
     { validator: (_rule: unknown, value: string, callback: (error?: Error) => void) => {
@@ -338,7 +347,8 @@ async function save() {
 
 /** 刪除票據（連同原圖）；確認後不可復原。 */
 async function removeReceipt(receipt: ReceiptDto) {
-  const name = receipt.merchantName || receipt.receiptDate || receipt.documentTypeLabel
+  const name = receipt.merchantName || receipt.receiptDate
+    || dictText(receipt.documentTypeDictId, null, documentTypes.value)
   try {
     await ElMessageBox.confirm(`刪除票據「${name}」？原圖會一併刪除，無法復原。`, '刪除票據',
       { type: 'warning', confirmButtonText: '刪除', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger' })
@@ -376,7 +386,8 @@ function exportQuery(): ReceiptQuery {
   return { siteCategoryDictId: exportForm.siteCategoryDictId || undefined,
     documentTypeDictId: exportForm.documentTypeDictId || undefined,
     type: exportForm.type || undefined,
-    start: exportForm.dates?.[0], end: exportForm.dates?.[1] }
+    start: exportForm.dates?.[0], end: exportForm.dates?.[1],
+    includeDescendants: exportForm.includeDescendants }
 }
 
 async function countExport() {
@@ -444,9 +455,9 @@ onBeforeUnmount(revokeImage)
     </header>
     <el-alert v-if="!configured && !loading" title="OCR 尚未配置：票據可直接手動填寫及保存，原圖照常保存；配置後可上傳原圖再按「OCR 識別」讀取資料" type="warning" :closable="false" show-icon />
     <el-form class="filters" label-position="top" @submit.prevent="load(true)">
-      <el-form-item label="地盤分類"><el-select v-model="filter.siteCategoryDictId" clearable filterable><el-option v-for="dict in siteCategories" :key="dict.id" :label="dict.label" :value="dict.id" /></el-select></el-form-item>
-      <el-form-item label="票據類型"><el-select v-model="filter.documentTypeDictId" clearable><el-option v-for="dict in documentTypes" :key="dict.id" :label="dict.label" :value="dict.id" /></el-select></el-form-item>
-      <el-form-item label="支出分類"><el-select v-model="filter.type" clearable><el-option v-for="dict in types" :key="dict.id" :label="dict.label" :value="dict.id" /></el-select></el-form-item>
+      <el-form-item label="地盤分類"><DictTreeSelect v-model="filter.siteCategoryDictId" :dicts="siteCategories" allow-disabled clearable placeholder="全部地盤" /></el-form-item>
+      <el-form-item label="票據類型"><DictTreeSelect v-model="filter.documentTypeDictId" :dicts="documentTypes" allow-disabled clearable placeholder="全部" /></el-form-item>
+      <el-form-item label="支出分類"><DictTreeSelect v-model="filter.type" :dicts="types" allow-disabled clearable placeholder="全部" /></el-form-item>
       <el-form-item label="票據日期"><el-date-picker v-model="dates" type="daterange" value-format="YYYY-MM-DD" start-placeholder="開始日期" end-placeholder="結束日期" /></el-form-item>
       <el-button type="primary" native-type="submit" :loading="loading">查詢</el-button>
     </el-form>
@@ -456,9 +467,11 @@ onBeforeUnmount(revokeImage)
         class="mc-table-summary" :show-summary="rows.length > 0" :summary-method="receiptSummary">
         <el-table-column prop="receiptDate" label="票據日期" width="120"><template #default="{ row }">{{ row.receiptDate || '未填寫' }}</template></el-table-column>
         <el-table-column prop="merchantName" label="商戶 / 供應商" min-width="160" show-overflow-tooltip />
-        <el-table-column prop="siteCategoryLabel" label="地盤分類" min-width="145" show-overflow-tooltip />
-        <el-table-column prop="documentTypeLabel" label="票據類型" width="100" />
-        <el-table-column prop="typeLabel" label="支出分類" width="100" />
+        <el-table-column label="地盤分類" min-width="145" show-overflow-tooltip>
+          <template #default="{ row }">{{ dictText(row.siteCategoryDictId, null, siteCategories) }}</template>
+        </el-table-column>
+        <el-table-column label="票據類型" width="100"><template #default="{ row }">{{ dictText(row.documentTypeDictId, null, documentTypes) }}</template></el-table-column>
+        <el-table-column label="支出分類" width="100"><template #default="{ row }">{{ dictText(row.type, null, types) }}</template></el-table-column>
         <el-table-column prop="amount" label="金額" width="190" align="right"><template #default="{ row }"><span class="number">{{ row.amount == null ? '未填寫' : `${row.currencyCode || '?'} ${row.amount.toLocaleString('zh-HK', { minimumFractionDigits: 2 })}` }}</span></template></el-table-column>
         <el-table-column label="原圖" width="110"><template #default="{ row }"><el-tag :type="!row.fileItemId ? 'info' : row.ocrStatus === 'Failed' ? 'danger' : row.ocrStatus === 'Succeeded' ? 'success' : 'warning'">{{ !row.fileItemId ? '無原圖' : statusNames[row.ocrStatus] || row.ocrStatus }}</el-tag></template></el-table-column>
         <el-table-column label="操作" width="130" fixed="right"><template #default="{ row }"><el-button link type="primary" :disabled="busy" @click="openDetail(row)">查看</el-button><el-button link type="danger" :disabled="busy" @click="removeReceipt(row)">刪除</el-button></template></el-table-column>
@@ -515,10 +528,10 @@ onBeforeUnmount(revokeImage)
         </div>
         <el-form ref="formRef" :model="form" :rules="rules" label-position="top" :disabled="busy">
           <div class="form-pair">
-            <el-form-item label="票據類型" prop="documentTypeDictId"><el-select v-model="form.documentTypeDictId"><el-option v-for="dict in documentTypes" :key="dict.id" :label="dict.label" :value="dict.id" :disabled="!dict.enabled" /></el-select></el-form-item>
-            <el-form-item label="支出分類" prop="type"><el-select v-model="form.type" placeholder="請選擇"><el-option v-for="dict in types" :key="dict.id" :label="dict.label" :value="dict.id" :disabled="!dict.enabled || dict.value === 'pending'" /></el-select><span v-if="pendingTypeSelected" class="form-hint">「待分類」不能保存，請選擇實際分類</span></el-form-item>
+            <el-form-item label="票據類型" prop="documentTypeDictId"><DictTreeSelect v-model="form.documentTypeDictId" :dicts="documentTypes" /></el-form-item>
+            <el-form-item label="支出分類" prop="type"><DictTreeSelect v-model="form.type" :dicts="types" :disabled-codes="['pending']" /><span v-if="pendingTypeSelected" class="form-hint">「待分類」不能保存，請選擇實際分類</span></el-form-item>
           </div>
-          <el-form-item label="地盤分類" prop="siteCategoryDictId"><el-select v-model="form.siteCategoryDictId" clearable filterable placeholder="請選擇"><el-option v-for="dict in siteCategories" :key="dict.id" :label="dict.label" :value="dict.id" :disabled="!dict.enabled" /></el-select><router-link v-if="!siteCategories.length" to="/system/categories" @click="detailVisible = false">新增地盤分類字典</router-link></el-form-item>
+          <el-form-item label="地盤分類" prop="siteCategoryDictId"><DictTreeSelect v-model="formSiteCategoryId" :dicts="siteCategories" clearable placeholder="請選擇" /><router-link v-if="!siteCategories.length" to="/system/categories" @click="detailVisible = false">新增地盤分類字典</router-link></el-form-item>
           <el-form-item label="票據日期" prop="receiptDate"><el-date-picker v-model="form.receiptDate" type="date" value-format="YYYY-MM-DD" placeholder="請選擇日期" /></el-form-item>
           <div class="form-pair">
             <el-form-item label="金額" prop="amount"><el-input-number v-model="form.amount" :min="0" :precision="2" :controls="false" placeholder="請輸入金額" /></el-form-item>
@@ -539,14 +552,15 @@ onBeforeUnmount(revokeImage)
 
     <el-dialog v-model="exportVisible" title="提取票據圖片" width="min(560px, calc(100vw - 32px))" :close-on-click-modal="!exporting" :show-close="!exporting" :close-on-press-escape="!exporting">
       <el-form ref="exportFormRef" class="export-form" :model="exportForm" :rules="exportRules" label-position="top" :disabled="exporting">
-        <el-form-item label="地盤分類" prop="siteCategoryDictId"><el-select v-model="exportForm.siteCategoryDictId" filterable placeholder="請選擇" @change="countExport"><el-option v-for="dict in siteCategories" :key="dict.id" :label="dict.label" :value="dict.id" :disabled="!dict.enabled" /></el-select><router-link v-if="!siteCategories.length" to="/system/categories" @click="exportVisible = false">新增地盤分類字典</router-link></el-form-item>
+        <el-form-item label="地盤分類" prop="siteCategoryDictId"><DictTreeSelect v-model="exportForm.siteCategoryDictId" :dicts="siteCategories" placeholder="請選擇" @update:model-value="countExport" /><router-link v-if="!siteCategories.length" to="/system/categories" @click="exportVisible = false">新增地盤分類字典</router-link></el-form-item>
         <div class="form-pair">
-          <el-form-item label="票據類型"><el-select v-model="exportForm.documentTypeDictId" clearable placeholder="全部" @change="countExport"><el-option v-for="dict in documentTypes" :key="dict.id" :label="dict.label" :value="dict.id" :disabled="!dict.enabled" /></el-select></el-form-item>
-          <el-form-item label="支出分類"><el-select v-model="exportForm.type" clearable placeholder="全部" @change="countExport"><el-option v-for="dict in types" :key="dict.id" :label="dict.label" :value="dict.id" :disabled="!dict.enabled" /></el-select></el-form-item>
+          <el-form-item label="票據類型"><DictTreeSelect v-model="exportForm.documentTypeDictId" :dicts="documentTypes" clearable placeholder="全部" @update:model-value="countExport" /></el-form-item>
+          <el-form-item label="支出分類"><DictTreeSelect v-model="exportForm.type" :dicts="types" clearable placeholder="全部" @update:model-value="countExport" /></el-form-item>
         </div>
         <el-form-item label="票據日期"><el-date-picker v-model="exportForm.dates" type="daterange" value-format="YYYY-MM-DD" start-placeholder="開始日期" end-placeholder="結束日期" @change="countExport" /></el-form-item>
+        <el-form-item label="包含下級分類"><el-switch v-model="exportForm.includeDescendants" @change="countExport" /><span class="export-switch-hint">選上級時連同其下級分類的票據一起提取</span></el-form-item>
       </el-form>
-      <el-descriptions :column="1"><el-descriptions-item label="符合票據">{{ exportCountLoading ? '查詢中' : exportCount ?? '未取得' }}</el-descriptions-item></el-descriptions>
+      <el-descriptions :column="1"><el-descriptions-item label="符合票據">{{ exportCountLoading ? '查詢中' : exportCount ?? '未取得' }}<span class="export-switch-hint">{{ exportForm.includeDescendants ? '含下級分類' : '按列表口徑含下級統計；關閉「包含下級」時實際導出較少' }}</span></el-descriptions-item></el-descriptions>
       <p class="export-hint">只包含已上傳原圖的票據。設定日期範圍時，未填票據日期的票據不會被包含；清空日期可包含它們。</p>
       <template #footer><el-button :disabled="exporting" @click="exportVisible = false">取消</el-button><el-button type="primary" :loading="exporting" :disabled="!exportCount || exportCountLoading" @click="downloadArchive"><AppIcon name="download" :size="16" />下載 ZIP</el-button></template>
     </el-dialog>
@@ -564,6 +578,7 @@ onBeforeUnmount(revokeImage)
 .filters :deep(.el-date-editor), .detail-grid :deep(.el-date-editor), .detail-grid :deep(.el-input-number) { width: 100%; min-width: 0; }
 .export-form :deep(.el-select), .export-form :deep(.el-date-editor) { width: 100%; min-width: 0; }
 .export-form .el-form-item { margin-bottom: 18px; }
+.export-switch-hint { margin-left: 10px; font-size: 12px; color: var(--el-text-color-secondary); }
 .export-hint { margin: 0; font-size: 12px; line-height: 1.6; color: var(--el-text-color-secondary); }
 .results { background: var(--el-bg-color); border-top: 1px solid var(--el-border-color); min-width: 0; }
 .result-heading { padding: 12px 16px; }

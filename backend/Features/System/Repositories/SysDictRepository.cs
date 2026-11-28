@@ -11,6 +11,7 @@ public sealed class SysDictRepository(ErpDbContext db) : ISysDictRepository
 
     public async Task<List<SysDict>> ListByGroupAsync(string groupName, CancellationToken ct = default)
     {
+        // 不 Include Parent：上級與下級在同一個分組的清單裡，跟蹤查詢會自動補好導覽
         return await db.SysDicts
             .Where(d => d.GroupName == groupName)
             .OrderBy(d => d.Sort)

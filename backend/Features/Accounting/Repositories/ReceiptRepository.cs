@@ -4,27 +4,31 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MC.Erp.Features.Accounting.Repositories;
 
-public sealed record ReceiptFilter(Guid? DocumentTypeDictId = null,
-    Guid? Type = null, Guid? SiteCategoryDictId = null, DateOnly? Start = null, DateOnly? End = null);
+/// <summary>
+/// 票據篩選；字典欄位是「自己 + 整棵子樹」的 id 清單（ReceiptService.ExpandFilterAsync 擴張），
+/// null = 不篩。列表選上級 = 連下級一起查，口徑與樹形下拉一致。
+/// </summary>
+public sealed record ReceiptFilter(List<Guid>? DocumentTypeDictIds = null,
+    List<Guid>? TypeIds = null, List<Guid>? SiteCategoryDictIds = null, DateOnly? Start = null, DateOnly? End = null);
 
-/// <summary>列表一行：只有列表欄位，OcrText / OcrResultJson 不查。</summary>
+/// <summary>列表一行：只有列表欄位。字典名稱由前端按 id 映射，接口不重複返回 label。</summary>
 public sealed record ReceiptListItem(Guid Id, Guid Version, Guid? FileItemId, string? FileName, string? ContentType,
-    string? Md5, long? SizeBytes, Guid DocumentTypeDictId, string DocumentTypeLabel,
-    Guid Type, string TypeLabel, Guid? SiteCategoryDictId, string? SiteCategoryLabel,
+    string? Md5, long? SizeBytes, Guid DocumentTypeDictId,
+    Guid Type, Guid? SiteCategoryDictId,
     DateOnly? ReceiptDate, decimal? Amount, string? CurrencyCode, string? MerchantName,
     string? InvoiceNumber, string? Remark, string OcrStatus, string? OcrError);
 
 /// <summary>詳情：列表欄位加上 OCR 原文和識別建議。</summary>
 public sealed record ReceiptDetail(Guid Id, Guid Version, Guid? FileItemId, string? FileName, string? ContentType,
-    string? Md5, long? SizeBytes, Guid DocumentTypeDictId, string DocumentTypeLabel,
-    Guid Type, string TypeLabel, Guid? SiteCategoryDictId, string? SiteCategoryLabel,
+    string? Md5, long? SizeBytes, Guid DocumentTypeDictId,
+    Guid Type, Guid? SiteCategoryDictId,
     DateOnly? ReceiptDate, decimal? Amount, string? CurrencyCode, string? MerchantName,
     string? InvoiceNumber, string? Remark, string OcrStatus, string? OcrError,
     string? OcrText, string? OcrResultJson);
 
 /// <summary>導出 ZIP 需要的欄位：原圖信息和目錄名。</summary>
-public sealed record ReceiptExport(Guid Id, Guid FileItemId, DateOnly? ReceiptDate, string? SiteCategoryLabel,
-    string TypeLabel, string FileName, long SizeBytes);
+public sealed record ReceiptExport(Guid Id, Guid FileItemId, DateOnly? ReceiptDate, Guid? SiteCategoryDictId,
+    string? SiteCategoryLabel, Guid Type, string TypeLabel, string FileName, long SizeBytes);
 
 /// <summary>單一幣種的金額合計；CurrencyCode 為 null 代表票據有金額但沒填幣種。</summary>
 public sealed record ReceiptCurrencyTotal(string? CurrencyCode, int Count, decimal Amount);
@@ -41,22 +45,22 @@ public sealed class ReceiptRepository(ErpDbContext db, IHttpContextAccessor cont
         // 沒有原圖的手動票據也要列出；原圖被軟刪除的票據維持不列出
         .Where(receipt => receipt.FileItemId == null
             || (receipt.FileItem != null && receipt.FileItem.TypeDict != null && receipt.FileItem.TypeDict.GroupName == "Accounting"))
-        .Where(receipt => filter.DocumentTypeDictId == null || receipt.DocumentTypeDictId == filter.DocumentTypeDictId)
-        .Where(receipt => filter.Type == null || receipt.Type == filter.Type)
-        .Where(receipt => filter.SiteCategoryDictId == null || receipt.SiteCategoryDictId == filter.SiteCategoryDictId)
+        .Where(receipt => filter.DocumentTypeDictIds == null || filter.DocumentTypeDictIds.Contains(receipt.DocumentTypeDictId))
+        .Where(receipt => filter.TypeIds == null || filter.TypeIds.Contains(receipt.Type))
+        .Where(receipt => filter.SiteCategoryDictIds == null
+            || (receipt.SiteCategoryDictId != null && filter.SiteCategoryDictIds.Contains(receipt.SiteCategoryDictId.Value)))
         .Where(receipt => filter.Start == null || receipt.ReceiptDate >= filter.Start)
         .Where(receipt => filter.End == null || receipt.ReceiptDate <= filter.End);
 
-    /// <summary>列表和詳情只投影需要的欄位；OcrText、OcrResultJson 這類大欄位留在列表之外，不讓每一頁都拖下來。</summary>
+    /// <summary>列表只投影需要的欄位；OcrText、OcrResultJson 這類大欄位留在列表之外，不讓每一頁都拖下來。</summary>
     private IQueryable<ReceiptListItem> ProjectList(IQueryable<Receipt> query) => query.Select(receipt => new ReceiptListItem(
         receipt.Id, receipt.Version, receipt.FileItemId,
         receipt.FileItem == null ? null : receipt.FileItem.OriginalName,
         receipt.FileItem == null ? null : receipt.FileItem.ContentType,
         receipt.FileItem == null ? null : receipt.FileItem.Md5,
         receipt.FileItem == null ? null : (long?)receipt.FileItem.SizeBytes,
-        receipt.DocumentTypeDictId, receipt.DocumentTypeDict.Label,
-        receipt.Type, receipt.TypeDict.Label,
-        receipt.SiteCategoryDictId, receipt.SiteCategoryDict == null ? null : receipt.SiteCategoryDict.Label,
+        receipt.DocumentTypeDictId,
+        receipt.Type, receipt.SiteCategoryDictId,
         receipt.ReceiptDate, receipt.Amount, receipt.CurrencyCode, receipt.MerchantName,
         receipt.InvoiceNumber, receipt.Remark, receipt.OcrStatus, receipt.OcrError));
 
@@ -66,9 +70,8 @@ public sealed class ReceiptRepository(ErpDbContext db, IHttpContextAccessor cont
         receipt.FileItem == null ? null : receipt.FileItem.ContentType,
         receipt.FileItem == null ? null : receipt.FileItem.Md5,
         receipt.FileItem == null ? null : (long?)receipt.FileItem.SizeBytes,
-        receipt.DocumentTypeDictId, receipt.DocumentTypeDict.Label,
-        receipt.Type, receipt.TypeDict.Label,
-        receipt.SiteCategoryDictId, receipt.SiteCategoryDict == null ? null : receipt.SiteCategoryDict.Label,
+        receipt.DocumentTypeDictId,
+        receipt.Type, receipt.SiteCategoryDictId,
         receipt.ReceiptDate, receipt.Amount, receipt.CurrencyCode, receipt.MerchantName,
         receipt.InvoiceNumber, receipt.Remark, receipt.OcrStatus, receipt.OcrError,
         receipt.OcrText, receipt.OcrResultJson));
@@ -98,7 +101,8 @@ public sealed class ReceiptRepository(ErpDbContext db, IHttpContextAccessor cont
         .Where(receipt => receipt.FileItemId != null)
         .OrderBy(receipt => receipt.ReceiptDate).ThenBy(receipt => receipt.Id).Take(5001)
         .Select(receipt => new ReceiptExport(receipt.Id, receipt.FileItemId!.Value, receipt.ReceiptDate,
-            receipt.SiteCategoryDict == null ? null : receipt.SiteCategoryDict.Label, receipt.TypeDict.Label,
+            receipt.SiteCategoryDictId, receipt.SiteCategoryDict == null ? null : receipt.SiteCategoryDict.Label,
+            receipt.Type, receipt.TypeDict.Label,
             receipt.FileItem!.OriginalName, receipt.FileItem.SizeBytes))
         .ToListAsync(Token);
 

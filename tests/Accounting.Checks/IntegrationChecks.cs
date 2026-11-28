@@ -147,7 +147,7 @@ internal static class IntegrationChecks
             // 手動錄入：沒有原圖也可以先建票據
             var manual = await Create(documentId);
             Check(manual.FileItemId == null && manual.FileName == null, "manual receipt has no image");
-            Check(manual.Type == pendingId && manual.TypeLabel == "待分類", "manual receipt starts as pending category");
+            Check(manual.Type == pendingId, "manual receipt starts as pending category");
             Check(manual.OcrStatus == "NotStarted", "manual receipt starts without OCR");
             using (var invalidForm = new MultipartFormDataContent())
             {
@@ -212,7 +212,7 @@ internal static class IntegrationChecks
             first = await Save(first, categoryB, new DateOnly(2026, 1, 1));
             second = await Save(second, categoryA, new DateOnly(2026, 12, 31));
             manual = await Save(manual, categoryB, new DateOnly(2026, 6, 1));
-            Check(manual.FileItemId == null && manual.Type == materialId && manual.TypeLabel == "材料", "manual receipt saves category without image");
+            Check(manual.FileItemId == null && manual.Type == materialId, "manual receipt saves category without image");
             using (var staleSave = await client.PutAsJsonAsync($"accounting/receipts/{first.Id}",
                 new UpdateReceiptRequest(staleVersion, documentId, materialId, categoryB, new DateOnly(2026, 1, 1), 1m, "HKD", null, null, null)))
                 Check(staleSave.StatusCode == HttpStatusCode.Conflict, "stale edit rejected");
@@ -329,6 +329,27 @@ internal static class IntegrationChecks
             var secondPage = await Get("storage/files?pageSize=1&page=2");
             Check(allFileCount >= 2 && secondPage.GetProperty("items").GetArrayLength() == 1
                 && secondPage.GetProperty("page").GetInt32() == 2, "storage list paginates by page size");
+            // 文件類別只認白名單分組；篩選可以按整個分組（分組本身沒有 id）
+            var storageTypes = await Get("storage/types");
+            var typeGroups = storageTypes.GetProperty("groups").EnumerateArray()
+                .Select(item => item.GetProperty("code").GetString()!).ToList();
+            Check(typeGroups.Count > 0
+                && typeGroups.All(code => code is "Accounting" or "AccountingDocumentType" or "AccountingSiteCategory" or "AttendanceCard"),
+                "storage types only expose whitelisted groups");
+            var typeDictGroups = storageTypes.GetProperty("dicts").EnumerateArray()
+                .Select(item => item.GetProperty("groupName").GetString()!).Distinct().ToList();
+            Check(typeDictGroups.Count > 0 && typeDictGroups.All(typeGroups.Contains),
+                "storage types dicts all belong to the listed groups");
+            using (var rejected = new MultipartFormDataContent())
+            {
+                rejected.Add(new ByteArrayContent([1, 2, 3]), "file", "rejected.txt");
+                using var wrongGroup = await client.PostAsync($"storage/files?type={dictOneId}", rejected);
+                Check(wrongGroup.StatusCode == HttpStatusCode.BadRequest, "group outside the file type whitelist rejected");
+            }
+            var byGroup = await Get("storage/files?type=group:Accounting");
+            Check(byGroup.GetProperty("total").GetInt32() >= 1 && byGroup.GetProperty("items").EnumerateArray()
+                .All(item => item.GetProperty("type").ValueKind != JsonValueKind.Null), "storage list filters by a whole group");
+
             using (var disablePending = await client.PutAsJsonAsync($"system/dicts/{pendingId}", new { enabled = false }))
                 Check(disablePending.StatusCode == HttpStatusCode.BadRequest, "pending category cannot be disabled");
             using (var deletePending = await client.DeleteAsync($"system/dicts/{pendingId}"))
@@ -344,6 +365,66 @@ internal static class IntegrationChecks
             Check(filtered.GetProperty("total").GetInt32() == 3, "disabled category history retained");
             using (var deleteDictOne = await client.DeleteAsync($"system/dicts/{dictOneId}")) deleteDictOne.EnsureSuccessStatusCode();
             using (var deleteDictTwo = await client.DeleteAsync($"system/dicts/{dictTwoId}")) deleteDictTwo.EnsureSuccessStatusCode();
+            // 多層結構：<上級>.<流水> 識別碼、自引用禁止、有下級不能刪
+            var siteGroup = (await Post("system/dict-groups", new { name = "Hierarchy Check" })).GetProperty("code").GetString()!;
+            var barn = await Post("system/dicts", new { groupName = siteGroup, label = "1" });
+            var barnId = barn.GetProperty("id").GetGuid();
+            Check(barn.GetProperty("parentId").ValueKind == JsonValueKind.Null, "top-level dict has no parent");
+            var floorOne = await Post("system/dicts", new { groupName = siteGroup, label = "1.1", parentId = barnId });
+            var floorTwo = await Post("system/dicts", new { groupName = siteGroup, label = "1.2", parentId = barnId });
+            Check(floorOne.GetProperty("value").GetString() == "1.1" && floorTwo.GetProperty("value").GetString() == "1.2",
+                "child dict values follow parent code");
+            Check(floorOne.GetProperty("parentId").GetGuid() == barnId, "child parent persisted");
+            var other = await Post("system/dicts", new { groupName = siteGroup, label = "2" });
+            var grandChild = await Post("system/dicts", new { groupName = siteGroup, label = "1.1.1", parentId = floorOne.GetProperty("id").GetGuid() });
+            Check(grandChild.GetProperty("value").GetString() == "1.1.1", "grandchild dict value nested");
+            using (var cycle = await client.PutAsJsonAsync($"system/dicts/{barnId}", new { parentId = floorOne.GetProperty("id").GetGuid() }))
+                Check(cycle.StatusCode == HttpStatusCode.BadRequest, "dict cannot become its own descendant");
+            using (var deleteParent = await client.DeleteAsync($"system/dicts/{barnId}"))
+                Check(deleteParent.StatusCode == HttpStatusCode.Conflict, "dict with children cannot be deleted");
+            using (var lockValue = await client.PutAsJsonAsync($"system/dicts/{barnId}", new { value = "9" }))
+                Check(lockValue.StatusCode == HttpStatusCode.BadRequest, "dict value is system generated");
+            var floorTwoId = floorTwo.GetProperty("id").GetGuid();
+            using (var moved = await client.PutAsJsonAsync($"system/dicts/{floorTwoId}", new { parentId = other.GetProperty("id").GetGuid() }))
+            {
+                Check(moved.StatusCode == HttpStatusCode.OK, "child can be moved to another parent");
+                Check((await moved.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("value").GetString() == "2.1",
+                    "moved child gets renumbered");
+            }
+            using (var unparent = await client.PutAsJsonAsync($"system/dicts/{floorTwoId}", new { parentId = (Guid?)null }))
+            {
+                Check(unparent.StatusCode == HttpStatusCode.OK, "child can be moved to top level");
+                Check((await unparent.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("value").GetString() == "3",
+                    "unparented dict gets top-level code");
+            }
+            // 列表篩選一律含下級：選上級地盤要連下級的票據一起算；只有導出才給「包含下級」開關
+            var siteParent = await Post("system/dicts", new { groupName = "AccountingSiteCategory", label = "Export Parent" });
+            var siteParentId = siteParent.GetProperty("id").GetGuid();
+            var siteChild = await Post("system/dicts", new { groupName = "AccountingSiteCategory", label = "Export Child", parentId = siteParentId });
+            var nested = await Upload(documentId, png);
+            nested = await Save(nested, siteChild.GetProperty("id").GetGuid(), new DateOnly(2026, 4, 1));
+            var nestedTotal = await Get($"accounting/receipts?siteCategoryDictId={siteParentId}");
+            Check(nestedTotal.GetProperty("total").GetInt32() == 1, "site filter includes descendant categories");
+            await using (var nestedZip = await client.GetStreamAsync($"accounting/receipts/export?siteCategoryDictId={siteParentId}"))
+            using (var archive = new ZipArchive(nestedZip, ZipArchiveMode.Read))
+                Check(archive.Entries.Count == 1, "export includes descendant categories by default");
+            using (var exact = await client.GetAsync($"accounting/receipts/export?siteCategoryDictId={siteParentId}&includeDescendants=false"))
+                Check(exact.StatusCode == HttpStatusCode.NotFound, "export without descendants only takes the exact category");
+            // 上級停用 = 整條分支都不再用：下級不可選，但已存的資料照樣查得到
+            using (var disableParent = await client.PutAsJsonAsync($"system/dicts/{siteParentId}", new { enabled = false }))
+                disableParent.EnsureSuccessStatusCode();
+            var blocked = await Upload(documentId, png);
+            using (var blockedSave = await client.PutAsJsonAsync($"accounting/receipts/{blocked.Id}",
+                new UpdateReceiptRequest(blocked.Version, documentId, pendingId,
+                    siteChild.GetProperty("id").GetGuid(), new DateOnly(2026, 4, 2), 10m, "HKD", null, null, null)))
+            {
+                Check(blockedSave.StatusCode == HttpStatusCode.BadRequest, "child of a disabled parent cannot be saved");
+                Check((await blockedSave.Content.ReadAsStringAsync()).Contains("上級分類"), "disabled ancestor is named in the error");
+            }
+            var history = await Get($"accounting/receipts?siteCategoryDictId={siteParentId}");
+            Check(history.GetProperty("total").GetInt32() == 1, "history under a disabled parent is still listed");
+            using (var enableParent = await client.PutAsJsonAsync($"system/dicts/{siteParentId}", new { enabled = true }))
+                enableParent.EnsureSuccessStatusCode();
             using (var deleteEmptyGroup = await client.DeleteAsync($"system/dict-groups/{customGroupId}"))
                 Check(deleteEmptyGroup.StatusCode == HttpStatusCode.NoContent, "empty group can be deleted");
             File.Delete(Directory.GetFiles(temporaryRoot).First());

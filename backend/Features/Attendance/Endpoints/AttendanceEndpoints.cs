@@ -115,17 +115,17 @@ public static class AttendanceEndpoints
     {
         var result = await svc.SyncAsync(id, request, ct);
         return TypedResults.Ok(new CardSyncResultDto(result.ScanId, result.Year, result.Month, result.WorkerId,
-            result.WorkerName, result.SiteDictId, result.SiteName, result.AddedRecords,
+            result.WorkerName, result.SiteDictId, result.AddedRecords,
             result.Summaries.Select(CardPayrollRowDto.From).ToList()));
     }
 }
 
 // DTOs
 public sealed record WorkerDto(Guid Id, string Name, string? EmployeeId, decimal DailyWage, bool IsActive,
-    Guid? PositionId, string? Position)
+    Guid? PositionId)
 {
     public static WorkerDto From(Worker w) => new(w.Id, w.Name, w.EmployeeId, w.DailyWage, w.IsActive,
-        w.PositionDictId, w.Position?.Label);
+        w.PositionDictId);
 }
 
 public sealed record CreateWorkerRequest([Required, MaxLength(50)] string Name, [MaxLength(50)] string? EmployeeId,
@@ -146,4 +146,4 @@ public sealed record CardPayrollRowDto(Guid Id, Guid? PositionDictId, string? Po
 
 /// <summary>同步結果：寫入幾筆打卡明細，以及重算後該員工該月薪酬表的行（按職位 × 地盤分組，可能多行）。</summary>
 public sealed record CardSyncResultDto(Guid ScanId, int Year, int Month, Guid WorkerId, string WorkerName,
-    Guid SiteDictId, string SiteName, int AddedRecords, List<CardPayrollRowDto> Rows);
+    Guid SiteDictId, int AddedRecords, List<CardPayrollRowDto> Rows);

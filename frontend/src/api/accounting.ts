@@ -9,11 +9,8 @@ export interface ReceiptDto {
   md5: string | null
   sizeBytes: number | null
   documentTypeDictId: string
-  documentTypeLabel: string
   type: string
-  typeLabel: string
   siteCategoryDictId: string | null
-  siteCategoryLabel: string | null
   receiptDate: string | null
   amount: number | null
   currencyCode: string | null
@@ -60,6 +57,8 @@ export interface ReceiptQuery {
   siteCategoryDictId?: string
   start?: string
   end?: string
+  /** 只在提取圖片（ZIP）用：false 時不做子樹擴張，只提取剛好落在所選分類的票據 */
+  includeDescendants?: boolean
 }
 
 export type UpdateReceipt = Pick<ReceiptDto, 'version' | 'documentTypeDictId' | 'siteCategoryDictId'

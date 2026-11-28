@@ -7,6 +7,7 @@ using MC.Erp.Features.Accounting.Entities;
 using MC.Erp.Features.Accounting.Repositories;
 using MC.Erp.Features.Accounting.Services;
 using MC.Erp.Features.System.Entities;
+using MC.Erp.Features.System.Services;
 
 var checks = 0;
 void Check(bool condition, string message)
@@ -123,9 +124,9 @@ catch (InvalidOperationException) { multiDocumentRejected = true; }
 Check(multiDocumentRejected, "Multiple documents rejected");
 Check(ReceiptService.SuggestCategory(receipt with { Text = "cement rental", ReceiptType = new OcrField<string?>(null, null) }) == null, "Conflicting categories stay pending");
 Check(ReceiptService.SuggestCategory(receipt with { ReceiptType = new OcrField<string?>("Transportation.Parking", null) }) == "transport", "Azure receipt type mapping");
-// 回應只帶票據欄位：新資料存識別建議、可原樣回傳；舊的 Azure 原始 JSON 不回前端
+// 回應只帶票據欄位：新資料存識別建議、可原樣回傳；舊的 Azure 原始 JSON 不回前端；字典名稱由前端按 id 映射
 ReceiptDetail StoredDetail(string json) => new(Guid.NewGuid(), Guid.NewGuid(), null, null, null, null, null,
-    Guid.NewGuid(), "收據", Guid.NewGuid(), "材料", null, null,
+    Guid.NewGuid(), Guid.NewGuid(), null,
     new DateOnly(2026, 11, 18), 1234.50m, "HKD", "陳記", "INV-1", "備註", "Succeeded", null,
     "整段原文", json);
 var storedResponse = ReceiptResponse.From(StoredDetail(JsonSerializer.Serialize(new OcrSuggestion(
@@ -136,7 +137,7 @@ Check(storedResponse.OcrResult?.Amount.Value == 1234.50m, "Stored suggestion rou
 Check(storedResponse.OcrResult?.ReviewFields.Contains("amount") == true, "Stored review fields survive");
 // 列表回應的型別本身不含 OCR 原文和識別建議：序列化後連 key 都不該出現
 var listedJson = JsonSerializer.Serialize(ReceiptListResponse.From(new ReceiptListItem(Guid.NewGuid(), Guid.NewGuid(),
-    null, null, null, null, null, Guid.NewGuid(), "收據", Guid.NewGuid(), "材料", null, null,
+    null, null, null, null, null, Guid.NewGuid(), Guid.NewGuid(), null,
     new DateOnly(2026, 11, 18), 1234.50m, "HKD", null, null, null, "Succeeded", null)),
     new JsonSerializerOptions(JsonSerializerDefaults.Web));
 Check(!listedJson.Contains("ocrText") && !listedJson.Contains("ocrResult"), "List response has no OCR fields");
@@ -146,5 +147,16 @@ Check(ReceiptResponse.From(StoredDetail("""
 """)).OcrResult == null, "Legacy Azure payload is not returned to the client");
 var unsafeName = ReceiptService.SafeName("../../bad\\image:*.png");
 Check(!unsafeName.Contains("..") && !unsafeName.Contains('/') && !unsafeName.Contains('\\'), "ZIP path sanitization");
+// 列表篩選一律含下級：子樹按 ParentId 收集（含自己、含停用項）；髒資料成環也不能死循環
+var subtreeRoot = new SysDict { Id = Guid.NewGuid(), Enabled = true };
+var subtreeChild = new SysDict { Id = Guid.NewGuid(), ParentId = subtreeRoot.Id, Enabled = false };
+var subtreeGrand = new SysDict { Id = Guid.NewGuid(), ParentId = subtreeChild.Id, Enabled = true };
+var subtree = SysDictService.SubtreeIds(subtreeRoot.Id, [subtreeRoot, subtreeChild, subtreeGrand,
+    new SysDict { Id = Guid.NewGuid(), ParentId = Guid.NewGuid(), Enabled = true }]);
+Check(subtree.SequenceEqual([subtreeRoot.Id, subtreeChild.Id, subtreeGrand.Id]),
+    "Subtree ids include self, children and disabled items");
+subtreeRoot.ParentId = subtreeChild.Id; // 髒資料成環
+Check(SysDictService.SubtreeIds(subtreeRoot.Id, [subtreeRoot, subtreeChild, subtreeGrand]).Count == 3,
+    "Cyclic parent links cannot loop the subtree walk");
 Console.WriteLine($"PASS: {checks} accounting checks (no Azure calls)");
 if (args.Contains("--integration")) await IntegrationChecks.RunAsync();

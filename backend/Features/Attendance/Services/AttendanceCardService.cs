@@ -212,7 +212,7 @@ public sealed record SyncCardRequest(Guid WorkerId, Guid SiteDictId);
 /// 薪酬按（職位 × 地盤）分組，所以同一張卡可能產生多行。
 /// </summary>
 public sealed record CardSyncResult(Guid ScanId, int Year, int Month, Guid WorkerId, string WorkerName,
-    Guid SiteDictId, string SiteName, int AddedRecords, IReadOnlyList<MonthlyWorkSummary> Summaries);
+    Guid SiteDictId, int AddedRecords, IReadOnlyList<MonthlyWorkSummary> Summaries);
 
 /// <summary>
 /// 考勤卡掃描：沿用票據識別的 AZURE_DOC_ENDPOINT / AZURE_DOC_KEY（同一個 client、prebuilt-layout 模型）。
@@ -347,9 +347,9 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
         var worker = await db.Workers.Include(item => item.Position)
             .FirstOrDefaultAsync(item => item.Id == request.WorkerId && !item.IsDeleted, ct)
             ?? throw new KeyNotFoundException("員工不存在");
-        var site = await db.SysDicts.FirstOrDefaultAsync(item =>
-                item.Id == request.SiteDictId && item.GroupName == SiteGroup && item.Enabled, ct)
-            ?? throw new KeyNotFoundException("地盤不存在或已停用，請在「系統字典 → 地盤」維護");
+        // 地盤和它的上級都要啟用：上級停用代表整個地盤已經結束，不能再往它底下導入新打卡
+        var site = await dicts.EnsureEnabledAsync(request.SiteDictId, SiteGroup,
+            "地盤不存在或已停用，請在「系統字典 → 地盤」維護", ct);
 
         // 日薪是計薪基礎，0 元會算出負數的實付人工，先擋住讓使用者補
         if (worker.DailyWage <= 0)
@@ -383,7 +383,7 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
 
         logger.LogInformation("考勤卡 {ScanId} 導入 {Count} 筆打卡明細給 {Worker}（替換 {Replaced} 筆），已重算 {Year}-{Month} 薪酬（{Rows} 行）",
             scan.Id, records.Count, worker.Name, imported.Count, year, month, summaries.Count);
-        return new CardSyncResult(scan.Id, year, month, worker.Id, worker.Name, site.Id, site.Label,
+        return new CardSyncResult(scan.Id, year, month, worker.Id, worker.Name, site.Id,
             records.Count, summaries);
     }
 

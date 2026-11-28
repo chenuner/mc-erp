@@ -75,6 +75,10 @@ async function handleCreate() {
 }
 
 async function toggleActive(user: UserDto) {
+  if (user.isProtected) {
+    ElMessage.warning('主管理員帳號不可停用')
+    return
+  }
   try {
     await updateUser(user.id, { isActive: !user.isActive })
     user.isActive = !user.isActive
@@ -85,6 +89,10 @@ async function toggleActive(user: UserDto) {
 }
 
 async function handleDelete(user: UserDto) {
+  if (user.isProtected) {
+    ElMessage.warning('主管理員帳號不可刪除')
+    return
+  }
   await ElMessageBox.confirm(`確定刪除用戶「${user.displayName ?? user.username}」嗎？此操作不可恢復。`, '危險操作', {
     confirmButtonText: '刪除',
     cancelButtonText: '取消',
@@ -120,7 +128,14 @@ onMounted(fetchUsers)
     <!-- 用戶列表 -->
     <div class="mc-card table-card">
       <el-table v-loading="loading" :data="users" stripe>
-        <el-table-column label="用戶名" prop="username" min-width="120" />
+        <el-table-column label="用戶名" prop="username" min-width="120">
+          <template #default="{ row }">
+            <span>{{ row.username }}</span>
+            <el-tooltip v-if="row.isProtected" content="主管理員：不可刪除、不可停用，運維帳號永遠存在" placement="top">
+              <el-tag size="small" type="warning" effect="plain" class="protected-tag">主管理員</el-tag>
+            </el-tooltip>
+          </template>
+        </el-table-column>
         <el-table-column label="顯示名" min-width="120">
           <template #default="{ row }">{{ row.displayName ?? '—' }}</template>
         </el-table-column>
@@ -136,10 +151,16 @@ onMounted(fetchUsers)
         </el-table-column>
         <el-table-column label="操作" width="160" align="center">
           <template #default="{ row }">
-            <el-button link type="primary" @click="toggleActive(row)">
+            <el-tooltip v-if="row.isProtected" content="主管理員帳號不可停用" placement="top">
+              <span class="action-locked"><el-button link type="primary" disabled>停用</el-button></span>
+            </el-tooltip>
+            <el-button v-else link type="primary" @click="toggleActive(row)">
               {{ row.isActive ? '停用' : '啟用' }}
             </el-button>
-            <el-button link type="danger" @click="handleDelete(row)">刪除</el-button>
+            <el-tooltip v-if="row.isProtected" content="主管理員帳號不可刪除" placement="top">
+              <span class="action-locked"><el-button link type="danger" disabled>刪除</el-button></span>
+            </el-tooltip>
+            <el-button v-else link type="danger" @click="handleDelete(row)">刪除</el-button>
           </template>
         </el-table-column>
         <template #empty>
@@ -211,5 +232,14 @@ onMounted(fetchUsers)
   display: flex;
   justify-content: flex-end;
   padding: 12px 16px;
+}
+
+/* 工具提示要包一層，禁用的按鈕本身不接收滑鼠事件 */
+.action-locked {
+  display: inline-block;
+}
+
+.protected-tag {
+  margin-left: 6px;
 }
 </style>

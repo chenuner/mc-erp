@@ -1,5 +1,7 @@
-# decisions.md — 需要你拍板的選項說明
+# docs/archive/decisions-2026-11-22.md — 2026-11-22 那輪的決策記錄
 
+> 這是**歷史記錄**，不是當前規範。當前規則見 `specs/`；這份只解釋「當初為什麼這樣選」。
+>
 > **拍板結果（2026-11-22）**
 >
 > | 決策 | 你的選擇 | 落地情況 |
@@ -16,7 +18,7 @@
 
 > 每條都寫清楚「選了會發生什麼、代價、我會改哪些檔案」，你只要回 1 / 2 / 3。
 > 我的推薦排在第一位，並標了推薦理由。
-> 對應問題細節見 [review-notes.md](./review-notes.md)。
+> 對應問題細節見 [docs/archive/review-notes-2026-11-22.md](review-notes-2026-11-22.md)。
 
 ---
 
@@ -58,7 +60,7 @@
 
 | # | 方案 | 會發生什麼 | 代價 |
 |---|------|-----------|------|
-| **1** ⭐ | **不管什麼環境都要求 `Bootstrap:AdminPassword`** | 本地第一次啟動也要先 `dotnet user-secrets set Bootstrap:AdminPassword ...`（README 已有這個寫法） | 整合檢查要注入 `Bootstrap__AdminPassword`（[IntegrationChecks.cs:67](tests/Accounting.Checks/IntegrationChecks.cs#L67) 現在硬編碼 `Admin@123`）；本地「開箱即用」的體驗消失 |
+| **1** ⭐ | **不管什麼環境都要求 `Bootstrap:AdminPassword`** | 本地第一次啟動也要先 `dotnet user-secrets set Bootstrap:AdminPassword ...`（README 已有這個寫法） | 整合檢查要注入 `Bootstrap__AdminPassword`（[IntegrationChecks.cs:67](../../tests/Accounting.Checks/IntegrationChecks.cs#L67) 現在硬編碼 `Admin@123`）；本地「開箱即用」的體驗消失 |
 | 2 | 保留預設密碼，但改成隨機生成並印在日誌 | 首次啟動印一個隨機密碼到控制台 | 日誌洩露途徑多一個；生產若誤設環境仍會洩露；沒有真正解決「環境分叉」 |
 | 3 | 保留現狀，只把它寫進 specs | 不改代碼 | 死規定還是被踩著，下一個人 review 又會提一次 |
 

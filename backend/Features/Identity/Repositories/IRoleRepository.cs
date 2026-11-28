@@ -13,4 +13,5 @@ public interface IRoleRepository
     Task AssignToUserAsync(Guid userId, Guid roleId, CancellationToken ct = default);
     Task RemoveFromUserAsync(Guid userId, Guid roleId, CancellationToken ct = default);
     Task<List<string>> GetRoleNamesAsync(Guid userId, CancellationToken ct = default);
+    Task<bool> HasRoleAsync(Guid userId, string roleName, CancellationToken ct = default);
 }

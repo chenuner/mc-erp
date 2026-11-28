@@ -39,6 +39,7 @@
 |------|------|------|------|
 | JWT Bearer | 10.x | ✅ 已採納 | 身份認證 |
 | Isopoh.Cryptography.Argon2 | 2.0.x | ✅ 已採納 | 密碼哈希（Argon2id） |
+| RateLimiting（.NET 內置） | - | ✅ 已採納 | 登錄限流：按客戶端 IP 20 次/分鐘，超額 429 + `Retry-After`；不引第三方套件 |
 
 ### 外部集成
 

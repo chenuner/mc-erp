@@ -83,7 +83,8 @@ public static class SystemEndpoints
     private static async Task<Created<SysDictDto>> CreateSysDictAsync(
         CreateSysDictRequest req, SysDictService svc, CancellationToken ct = default)
     {
-        var dict = await svc.CreateAsync(req.GroupName, req.Label, req.Value, req.Sort, req.Enabled, req.Remark, ct);
+        var dict = await svc.CreateAsync(req.GroupName, req.Label, req.Value, req.Sort, req.Enabled, req.Remark,
+            req.ParentId, ct);
         return TypedResults.Created($"/api/system/dicts/{dict.Id}", ToDto(dict));
     }
 
@@ -97,7 +98,8 @@ public static class SystemEndpoints
     private static async Task<Results<Ok<SysDictDto>, NotFound>> UpdateSysDictAsync(
         Guid id, UpdateSysDictRequest req, SysDictService svc, CancellationToken ct = default)
     {
-        var dict = await svc.UpdateAsync(id, req.Label, req.Value, req.Sort, req.Enabled, req.Remark, ct);
+        var dict = await svc.UpdateAsync(id, req.Label, req.Value, req.Sort, req.Enabled, req.Remark,
+            req.ParentId is null, req.ParentId, ct);
         return dict is null ? TypedResults.NotFound() : TypedResults.Ok(ToDto(dict));
     }
 
@@ -119,7 +121,7 @@ public static class SystemEndpoints
             summary.Group.Remark, summary.Group.IsSystem, summary.ItemCount, summary.EnabledCount);
 
     private static SysDictDto ToDto(SysDict dict)
-        => new(dict.Id, dict.GroupName, dict.Label, dict.Value, dict.Sort, dict.Enabled, dict.Remark);
+        => new(dict.Id, dict.GroupName, dict.Label, dict.Value, dict.Sort, dict.Enabled, dict.Remark, dict.ParentId);
 }
 
 // DTOs
@@ -143,17 +145,23 @@ public sealed record CreateSysDictRequest(
     [MaxLength(50)] string? Value = null,
     int? Sort = null,
     bool? Enabled = null,
-    [MaxLength(255)] string? Remark = null);
+    [MaxLength(255)] string? Remark = null,
+    /// <summary>上級字典項 ID，留空為頂層</summary>
+    Guid? ParentId = null);
 
 public sealed record UpdateSysDictRequest(
     [MaxLength(100)] string? Label,
     [MaxLength(50)] string? Value,
     int? Sort,
     bool? Enabled,
-    [MaxLength(255)] string? Remark);
+    [MaxLength(255)] string? Remark,
+    /// <summary>上級字典項 ID；不傳或傳 null 即改為頂層</summary>
+    Guid? ParentId = null);
 
 public sealed record ReorderSysDictRequest(
     [Required, MaxLength(50)] string GroupName,
     [Required] List<Guid> Ids);
 
-public sealed record SysDictDto(Guid Id, string GroupName, string Label, string Value, int Sort, bool Enabled, string? Remark);
+// ParentId 為上級字典項（同一分組內的多層結構），頂層為 null
+public sealed record SysDictDto(
+    Guid Id, string GroupName, string Label, string Value, int Sort, bool Enabled, string? Remark, Guid? ParentId);

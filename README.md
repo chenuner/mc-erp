@@ -15,13 +15,19 @@
 
 ```
 mc-erp/
-├── AGENTS.md              # AI 編程行為規範
+├── AGENTS.md              # AI 編程入口（命令、金科玉律、任務路由）
 ├── specs/                 # 技術規範（唯一真理源）
-│   ├── README.md          # specs 導航
+│   ├── README.md          # specs 導航（按任務選讀）
 │   ├── status.md          # 當前實現狀態
 │   ├── tech-stack.md      # 技術棧規範
-│   ├── architecture.md    # 架構規範
-│   └── design-system.md   # 前端設計系統
+│   ├── architecture.md    # 架構：分層、模組、目錄、DB、API
+│   ├── design-system.md   # 前端設計系統
+│   └── domain/            # 各模組業務規則（改哪塊讀哪份）
+│       ├── attendance.md  # 打卡、工數、薪酬、考勤卡
+│       ├── accounting.md  # 收據、OCR、ZIP 提取
+│       ├── storage.md     # 文件、MD5 去重、下載
+│       └── system-dict.md # 字典層級、樹形下拉、分類篩選
+├── docs/archive/          # 歷史決策與未結項（已結案記錄）
 ├── backend/               # ASP.NET Core 後端
 │   ├── Common/            # 公共基礎設施
 │   ├── Features/          # 業務模組
@@ -45,7 +51,9 @@ mc-erp/
 ├── tests/                 # 後端檢查程序
 ├── deploy/                # 初始化、部署腳本及操作說明
 ├── scripts/               # 本地驗證腳本
-│   └── check.ps1          # 一鍵 build + Checks + 前端建置
+│   ├── check.ps1          # 一鍵 build + Checks + 前端建置
+│   └── clean.ps1          # 倉庫清理（默認只掃描，-Apply 才刪）
+├── docs/archive/          # 已結案的歷史記錄（不影響代碼）
 ├── docker-compose.yml     # 本地開發資料庫
 ├── docker-compose.prod.yml # 生產前端、後端及資料庫
 ├── global.json            # .NET SDK 版本
@@ -121,11 +129,36 @@ pnpm run dev
 
 ### 添加新功能
 
-1. 閱讀 [specs/architecture.md](specs/architecture.md) 了解模組結構
+1. 按 [AGENTS.md 的「任務 → 先讀哪份」](AGENTS.md#任務--先讀哪份按需讀不要一次全讀) 表讀對應的規範（架構 + 那個模組的業務規則），不用把 specs 全讀完
 2. 在 `backend/Features/{ModuleName}/` 下按 Endpoints / Services / Entities / Repositories 分層
 3. 在 `ErpDbContext` 中註冊實體
 4. 在 `Program.cs` 中註冊 DI（本項目手動註冊，未用 Scrutor 掃描）
-5. 跑 `pwsh -File scripts/check.ps1` 驗證
+5. 跑 `pwsh -File scripts/check.ps1` 驗證，並照「改完要同步的文檔」更新 specs
+
+### 清理倉庫
+
+清理分兩支，各管一件事：
+
+**1. `scripts/clean.ps1` — 清磁碟（只刪能重建的）**
+
+```powershell
+pwsh -File scripts/clean.ps1                        # 只掃描，列出每一項佔多少空間
+pwsh -File scripts/clean.ps1 -Apply                 # 刪基本清理項（臨時目錄、日誌）
+pwsh -File scripts/clean.ps1 -Apply -Deep           # 連建置產物一起刪（bin/obj/dist/node_modules）
+pwsh -File scripts/clean.ps1 -Apply -Deep -KeepNodeModules   # 清產物但保留依賴
+```
+
+`backend/storage-files`（已上傳檔案本體）、`mc-erp-temp`（後端 TMP）、`appsettings*.json`、`.vs` 一律列在「保留不動」，腳本永遠不會刪。有檔案被執行中的後端鎖住時會標出來（`-Apply` 會顯示「被執行中的程序鎖住」），關掉後端重跑即可。刪完跑一次 `scripts/check.ps1` 確認。
+
+**2. `repo-cleanup` 技能 — 找死代碼（不刪東西）**
+
+配套掃描腳本 `%USERPROFILE%\.dsh\skills\repo-cleanup\scan.ps1` 只讀，列出：零引用的前端檔案、`api/*.ts` 零引用的匯出函數、`package.json` 沒用到的依賴、`assets` / `public` 沒用到的圖片、可能含明文帳密或自動登入的檔案，以及可重建產物的空間佔用（後三類與 `clean.ps1` 重疊，只是給人一眼看全）。
+
+```powershell
+pwsh -File "$env:USERPROFILE\.dsh\skills\repo-cleanup\scan.ps1" -Root .
+```
+
+在 DeepSeek Harness 裡直接說「**清理代碼倉庫**」就會走這套流程：先掃、按風險分組列清單、等你點名再刪。
 
 ### 數據庫遷移
 

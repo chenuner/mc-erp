@@ -14,12 +14,10 @@ export interface UserDto {
   email: string | null
   displayName: string | null
   isActive: boolean
-}
-
-export interface RoleDto {
-  id: string
-  name: string
-  description: string | null
+  /** 受保護的主管理員：不可刪除、不可停用 */
+  isProtected: boolean
+  /** 角色名清單，例如 ['Admin'] */
+  roles: string[]
 }
 
 export async function login(username: string, password: string): Promise<string> {
@@ -49,8 +47,4 @@ export async function updateUser(
 
 export async function deleteUser(id: string): Promise<void> {
   await request.delete(`/identity/users/${id}`)
-}
-
-export async function listRoles(page = 1, pageSize = 20): Promise<PagedResult<RoleDto>> {
-  return (await request.get('/identity/roles', { params: { page, pageSize } })) as PagedResult<RoleDto>
 }

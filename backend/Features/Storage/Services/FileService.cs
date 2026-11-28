@@ -3,6 +3,7 @@ using MC.Erp.Common.Security;
 using MC.Erp.Data;
 using MC.Erp.Features.Storage.Entities;
 using MC.Erp.Features.Accounting.Services;
+using MC.Erp.Features.System.Entities;
 using MC.Erp.Features.System.Services;
 using Microsoft.EntityFrameworkCore;
 
@@ -17,14 +18,23 @@ namespace MC.Erp.Features.Storage.Services;
 /// 生產環境：容器內 /app/storage-files/xxxx.png（docker volume storage 掛載，重建容器不丟文件）
 /// </remarks>
 public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentUser user, SysDictService dictService,
-    AccountingFileProtectionService accounting, IHttpContextAccessor context)
+    SysDictGroupService groupService, AccountingFileProtectionService accounting, IHttpContextAccessor context)
 {
+    /// <summary>
+    /// 可以當「文件類別」的字典分組：文件庫只認這幾類，職位分類、驗證分組之類不該出現在上傳與篩選裡。
+    /// 新增一類文件就在這裡加一個分組代碼。
+    /// </summary>
+    public static readonly string[] FileTypeGroups =
+        ["Accounting", "AccountingDocumentType", "AccountingSiteCategory", "AttendanceCard"];
+
+    /// <summary>按分組篩選的寫法：type=group:Accounting 代表整個分組（分組本身不是字典項，沒有 id）。</summary>
+    public const string GroupPrefix = "group:";
+
     public async Task<FileItem> 上传Async(Guid type, string originalName, string contentType, long sizeBytes, Stream content, CancellationToken ct = default)
     {
         ct = context.HttpContext?.RequestAborted ?? ct;
-        var dict = await dictService.GetByIdAsync(type, ct);
-        if (dict is null || !dict.Enabled)
-            throw new InvalidOperationException("請選擇有效且啟用的文件類別");
+        var dict = await dictService.EnsureEnabledAsync(type, null, "請選擇有效且啟用的文件類別", ct);
+        if (!FileTypeGroups.Contains(dict.GroupName)) throw new InvalidOperationException("這個分組不能當文件類別");
         if (dict.GroupName == "Accounting" && !user.IsInRole("Admin")) throw new UnauthorizedAccessException();
 
         var saved = await storage.SaveAsync(content, originalName, ct);
@@ -66,11 +76,46 @@ public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentU
         return existing;
     }
 
-    public async Task<(List<FileItem> Items, int Total)> 列表Async(Guid? type, int page, int pageSize, CancellationToken ct)
+    /// <summary>
+    /// 列表的類別篩選：空 = 全部；group:xxx = 整個分組；字典項 id = 該項連同下級子樹（子樹按 ParentId 走，識別碼會重新編號）。
+    /// </summary>
+    public async Task<List<Guid>?> 解析類別Async(string? type, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(type)) return null;
+        if (type.StartsWith(GroupPrefix, StringComparison.Ordinal))
+        {
+            var ids = await dictService.GroupDictIdsAsync(type[GroupPrefix.Length..], ct);
+            if (ids.Count == 0) throw new InvalidOperationException("分組不存在或底下沒有分類");
+            return ids;
+        }
+        if (!Guid.TryParse(type, out var id)) throw new InvalidOperationException("無效的文件類別");
+        return await dictService.SubtreeIdsAsync(id, ct);
+    }
+
+    /// <summary>
+    /// 文件類別的可選清單：只回白名單分組（含停用項，歷史文件要能按停用類別篩選）。
+    /// 前端據此建樹，不用再把整份字典拉下來。
+    /// </summary>
+    public async Task<(List<SysDictGroup> Groups, List<SysDict> Dicts)> 類別選項Async(CancellationToken ct = default)
+    {
+        var groups = new List<SysDictGroup>();
+        var dicts = new List<SysDict>();
+        foreach (var summary in await groupService.ListAsync(ct))
+        {
+            if (!FileTypeGroups.Contains(summary.Group.Code)) continue;
+            // 非 Admin 看不到會計支出分類的圖片，篩選裡也不該出現這個分組
+            if (summary.Group.Code == "Accounting" && !user.IsInRole("Admin")) continue;
+            groups.Add(summary.Group);
+            dicts.AddRange(await dictService.ListByGroupAsync(summary.Group.Code, ct));
+        }
+        return (groups, dicts);
+    }
+
+    public async Task<(List<FileItem> Items, int Total)> 列表Async(List<Guid>? types, int page, int pageSize, CancellationToken ct)
     {
         var query = db.FileItems
             .AsNoTracking()
-            .Where(f => !f.IsDeleted && (type == null || f.Type == type))
+            .Where(f => !f.IsDeleted && (types == null || (f.Type != null && types.Contains(f.Type.Value))))
             .Where(f => user.IsInRole("Admin") || f.TypeDict == null || f.TypeDict.GroupName != "Accounting");
         var total = await query.CountAsync(ct);
         // 批量上傳的時間戳常常相同，加 Id 當次序，分頁才不會重複或漏行
@@ -115,8 +160,7 @@ public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentU
     {
         if (!user.IsInRole("Admin")) throw new UnauthorizedAccessException();
         var ct = context.HttpContext?.RequestAborted ?? default;
-        var dict = await dictService.GetByIdAsync(type, ct);
-        if (dict is null || !dict.Enabled || dict.GroupName != "Accounting") throw new InvalidOperationException("請選擇有效支出分類");
+        var dict = await dictService.EnsureEnabledAsync(type, "Accounting", "請選擇有效支出分類", ct);
         var file = await db.FileItems.Include(item => item.TypeDict).FirstOrDefaultAsync(item => item.Id == id, ct);
         if (file?.TypeDict?.GroupName != "Accounting") throw new InvalidOperationException("會計圖片不存在");
         file.Type = dict.Id;
