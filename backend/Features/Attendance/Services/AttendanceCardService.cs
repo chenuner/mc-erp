@@ -212,7 +212,7 @@ public sealed record SyncCardRequest(Guid WorkerId, Guid SiteDictId);
 /// 薪酬按（職位 × 地盤）分組，所以同一張卡可能產生多行。
 /// </summary>
 public sealed record CardSyncResult(Guid ScanId, int Year, int Month, Guid WorkerId, string WorkerName,
-    Guid SiteDictId, string SiteName, int AddedRecords, IReadOnlyList<MonthlyWorkSummary> Summaries);
+    Guid SiteDictId, int AddedRecords, IReadOnlyList<MonthlyWorkSummary> Summaries);
 
 /// <summary>
 /// 考勤卡掃描：沿用票據識別的 AZURE_DOC_ENDPOINT / AZURE_DOC_KEY（同一個 client、prebuilt-layout 模型）。
@@ -383,7 +383,7 @@ public sealed class AttendanceCardService(IAttendanceCardOcrService ocr, ErpDbCo
 
         logger.LogInformation("考勤卡 {ScanId} 導入 {Count} 筆打卡明細給 {Worker}（替換 {Replaced} 筆），已重算 {Year}-{Month} 薪酬（{Rows} 行）",
             scan.Id, records.Count, worker.Name, imported.Count, year, month, summaries.Count);
-        return new CardSyncResult(scan.Id, year, month, worker.Id, worker.Name, site.Id, site.Label,
+        return new CardSyncResult(scan.Id, year, month, worker.Id, worker.Name, site.Id,
             records.Count, summaries);
     }
 

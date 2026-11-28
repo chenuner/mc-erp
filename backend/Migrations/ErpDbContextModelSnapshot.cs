@@ -620,6 +620,9 @@ namespace MC.Erp.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<Guid?>("ParentId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Remark")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
@@ -644,6 +647,9 @@ namespace MC.Erp.Migrations
 
                     b.HasIndex("GroupName")
                         .HasDatabaseName("idx_sys_dict_group_name");
+
+                    b.HasIndex("ParentId")
+                        .HasDatabaseName("idx_sys_dict_parent");
 
                     b.ToTable("sys_dict", (string)null);
                 });
@@ -846,6 +852,16 @@ namespace MC.Erp.Migrations
                     b.Navigation("TypeDict");
                 });
 
+            modelBuilder.Entity("MC.Erp.Features.System.Entities.SysDict", b =>
+                {
+                    b.HasOne("MC.Erp.Features.System.Entities.SysDict", "Parent")
+                        .WithMany("Children")
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Parent");
+                });
+
             modelBuilder.Entity("MC.Erp.Features.Attendance.Entities.AttendanceCardScan", b =>
                 {
                     b.Navigation("Punches");
@@ -873,6 +889,11 @@ namespace MC.Erp.Migrations
             modelBuilder.Entity("MC.Erp.Features.Identity.Entities.User", b =>
                 {
                     b.Navigation("UserRoles");
+                });
+
+            modelBuilder.Entity("MC.Erp.Features.System.Entities.SysDict", b =>
+                {
+                    b.Navigation("Children");
                 });
 #pragma warning restore 612, 618
         }

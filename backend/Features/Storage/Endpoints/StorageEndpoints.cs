@@ -74,8 +74,8 @@ public static class StorageEndpoints
 }
 
 public sealed record FileDto(
-    Guid Id, Guid? Type, string? TypeLabel, string OriginalName, string ContentType, long SizeBytes, string? UploaderName, DateTime CreatedAt, string? Md5)
+    Guid Id, Guid? Type, string OriginalName, string ContentType, long SizeBytes, string? UploaderName, DateTime CreatedAt, string? Md5)
 {
     public static FileDto From(FileItem f) =>
-        new(f.Id, f.Type, f.TypeDict?.Label, f.OriginalName, f.ContentType, f.SizeBytes, f.UploaderName, f.CreatedAt, f.Md5);
+        new(f.Id, f.Type, f.OriginalName, f.ContentType, f.SizeBytes, f.UploaderName, f.CreatedAt, f.Md5);
 }

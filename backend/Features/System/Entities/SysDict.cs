@@ -23,6 +23,22 @@ public sealed class SysDict : AuditableEntity
     public string Value { get; set; } = null!;
 
     /// <summary>
+    /// 上級字典項 ID（NULL 表示頂層）。同一分組內的多層結構，例如地盤「牛房」下的「一樓」「二樓」。
+    /// 只建導覽，資料庫不建外鍵。
+    /// </summary>
+    public Guid? ParentId { get; set; }
+
+    /// <summary>
+    /// 上級字典項（僅為查詢方便，不靠資料庫約束）。
+    /// </summary>
+    public SysDict? Parent { get; set; }
+
+    /// <summary>
+    /// 下級字典項。
+    /// </summary>
+    public List<SysDict> Children { get; set; } = [];
+
+    /// <summary>
     /// 排序序号（INT，默认0）。
     /// </summary>
     public int Sort { get; set; } = 0;

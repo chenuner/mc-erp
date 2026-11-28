@@ -15,8 +15,33 @@ public sealed class SysDictService(ISysDictRepository repo, ISysDictGroupReposit
     public Task<(List<SysDict> Items, int Total)> ListAsync(int page, int pageSize, CancellationToken ct = default)
         => repo.ListAsync(page, pageSize, ct);
 
+    /// <summary>
+    /// 某一項連同整棵子樹的 id（含自己、含停用項）：列表篩選選上級 = 下級一起查出來。
+    /// 識別碼會在換上級時重新編號，所以子樹一律按 ParentId 走，不按識別碼前綴。
+    /// </summary>
+    public async Task<List<Guid>> SubtreeIdsAsync(Guid rootId, CancellationToken ct = default)
+    {
+        var root = await repo.GetByIdAsync(rootId, ct);
+        if (root is null) return [rootId];
+        var items = await repo.ListByGroupAsync(root.GroupName, ct);
+        return SubtreeIds(rootId, items);
+    }
+
+    /// <summary>純函數版子樹收集（含自己、含停用項）；seen 防環，髒資料成環也不會死循環。</summary>
+    public static List<Guid> SubtreeIds(Guid rootId, List<SysDict> items)
+    {
+        var ids = new List<Guid> { rootId };
+        var seen = new HashSet<Guid> { rootId };
+        for (var index = 0; index < ids.Count; index++)
+        {
+            foreach (var child in items.Where(item => item.ParentId == ids[index]))
+                if (seen.Add(child.Id)) ids.Add(child.Id);
+        }
+        return ids;
+    }
+
     public async Task<SysDict> CreateAsync(string groupName, string label, string? value = null, int? sort = null,
-        bool? enabled = null, string? remark = null, CancellationToken ct = default)
+        bool? enabled = null, string? remark = null, Guid? parentId = null, CancellationToken ct = default)
     {
         groupName = (groupName ?? string.Empty).Trim();
         label = (label ?? string.Empty).Trim();
@@ -25,7 +50,8 @@ public sealed class SysDictService(ISysDictRepository repo, ISysDictGroupReposit
             ?? throw new InvalidOperationException("分組不存在，請先建立分組");
 
         var items = await repo.ListByGroupAsync(groupName, ct);
-        value = string.IsNullOrWhiteSpace(value) ? NextValue(items) : value.Trim();
+        var parent = parentId is null ? null : await EnsureParentAsync(parentId.Value, groupName, Guid.Empty, items, ct);
+        value = string.IsNullOrWhiteSpace(value) ? NextValue(items, parent) : value.Trim();
         if (items.Any(dict => dict.Value == value))
             throw new InvalidOperationException($"分組「{group.Name}」下已存在識別碼「{value}」");
 
@@ -34,7 +60,8 @@ public sealed class SysDictService(ISysDictRepository repo, ISysDictGroupReposit
             GroupName = groupName,
             Label = label,
             Value = value,
-            Sort = sort ?? NextSort(items),
+            ParentId = parent?.Id,
+            Sort = sort ?? NextSort(items, parent?.Id),
             Enabled = enabled ?? true,
             Remark = string.IsNullOrWhiteSpace(remark) ? null : remark.Trim()
         };
@@ -44,7 +71,8 @@ public sealed class SysDictService(ISysDictRepository repo, ISysDictGroupReposit
     }
 
     public async Task<SysDict?> UpdateAsync(Guid id, string? label = null, string? value = null, int? sort = null,
-        bool? enabled = null, string? remark = null, CancellationToken ct = default)
+        bool? enabled = null, string? remark = null, bool clearParent = false, Guid? parentId = null,
+        CancellationToken ct = default)
     {
         var dict = await repo.GetByIdAsync(id, ct);
         if (dict is null) return null;
@@ -56,19 +84,25 @@ public sealed class SysDictService(ISysDictRepository repo, ISysDictGroupReposit
             dict.Label = trimmed;
         }
 
-        if (value is not null)
+        // 識別碼由系統按層級生成（頂層 1、2，下級 1.1、1.2），不支援手動修改
+        if (value is not null && value.Trim() != dict.Value)
+            throw new InvalidOperationException("識別碼由系統自動生成，不可修改");
+
+        // 換上級：clearParent 為 true 表示改為頂層，否則 parentId 有值才處理
+        if (clearParent || parentId is Guid)
         {
-            var trimmed = value.Trim();
-            if (trimmed.Length == 0) throw new InvalidOperationException("識別碼不能為空");
-            if (trimmed != dict.Value)
+            var items = await repo.ListByGroupAsync(dict.GroupName, ct);
+            var parent = parentId is Guid targetParentId
+                ? await EnsureParentAsync(targetParentId, dict.GroupName, dict.Id, items, ct)
+                : null;
+            if (parent?.Id != dict.ParentId)
             {
-                var group = await groups.GetByCodeAsync(dict.GroupName, ct);
-                if (group?.IsSystem == true)
-                    throw new InvalidOperationException("系統分組的識別碼不可修改");
-                var items = await repo.ListByGroupAsync(dict.GroupName, ct);
-                if (items.Any(item => item.Id != id && item.Value == trimmed))
-                    throw new InvalidOperationException($"分組下已存在識別碼「{trimmed}」");
-                dict.Value = trimmed;
+                // 有下級的項不搬動，只可以拆掉自己的上級，避免整棵子樹跟着跑
+                if (parent is not null && items.Any(item => item.ParentId == dict.Id))
+                    throw new InvalidOperationException("此項下還有下級，不能再歸到其他上級之下；請先把它們移走");
+                dict.ParentId = parent?.Id;
+                // 換層級後識別碼要跟着重新編號，否則 1.2 掛到別處會和同層衝突
+                dict.Value = NextValue(items.Where(item => item.Id != dict.Id).ToList(), parent);
             }
         }
 
@@ -116,6 +150,10 @@ public sealed class SysDictService(ISysDictRepository repo, ISysDictGroupReposit
             if (!others.Any(item => item.Id != dict.Id && item.Enabled))
                 throw new InvalidOperationException("票據類型至少要保留一個啟用項");
         }
+        // 上級刪掉會令下級變成孤兒，先讓用戶自己決定下級去哪
+        var children = await repo.ListByGroupAsync(dict.GroupName, ct);
+        if (children.Any(item => item.ParentId == dict.Id))
+            throw new InvalidOperationException("此項下還有下級，請先移走或刪除下級再刪除");
 
         await repo.DeleteAsync(dict, ct);
         return true;
@@ -137,15 +175,59 @@ public sealed class SysDictService(ISysDictRepository repo, ISysDictGroupReposit
             throw new InvalidOperationException("票據類型至少要保留一個啟用項");
     }
 
-    private static string NextValue(List<SysDict> items)
+    private static string NextValue(List<SysDict> items, SysDict? parent)
     {
-        var max = items
-            .Select(dict => int.TryParse(dict.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var number) ? number : 0)
+        // 頂層：1、2、3…；下級：跟在上級識別碼後面（1.1、1.2…），一看就知道屬於誰
+        if (parent is null)
+        {
+            var max = items
+                .Where(dict => dict.ParentId is null)
+                .Select(dict => int.TryParse(dict.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var number) ? number : 0)
+                .DefaultIfEmpty(0)
+                .Max();
+            return (max + 1).ToString(CultureInfo.InvariantCulture);
+        }
+
+        var siblings = items.Where(dict => dict.ParentId == parent.Id).ToList();
+        var prefix = parent.Value + ".";
+        var next = siblings
+            .Select(dict => dict.Value.StartsWith(prefix, StringComparison.Ordinal)
+                && int.TryParse(dict.Value.AsSpan(prefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out var number)
+                    ? number
+                    : 0)
             .DefaultIfEmpty(0)
-            .Max();
-        return (max + 1).ToString(CultureInfo.InvariantCulture);
+            .Max() + 1;
+        return prefix + next.ToString(CultureInfo.InvariantCulture);
     }
 
-    private static int NextSort(List<SysDict> items)
-        => items.Count == 0 ? 1 : items.Max(dict => dict.Sort) + 1;
+    private static int NextSort(List<SysDict> items, Guid? parentId)
+    {
+        var siblings = items.Where(dict => dict.ParentId == parentId).ToList();
+        return siblings.Count == 0 ? 1 : siblings.Max(dict => dict.Sort) + 1;
+    }
+
+    /// <summary>上級必須存在、同一分組，而且不能形成環（候選上級自己就是自身下級時拒絕）。</summary>
+    private async Task<SysDict> EnsureParentAsync(Guid parentId, string groupName, Guid dictId, List<SysDict> items,
+        CancellationToken ct)
+    {
+        var parent = await repo.GetByIdAsync(parentId, ct)
+            ?? throw new InvalidOperationException("上級不存在，請重新載入後重試");
+        if (parent.GroupName != groupName)
+            throw new InvalidOperationException("上級必須屬於同一分組");
+
+        if (dictId == Guid.Empty) return parent;
+
+        // 從候選上級往上走，走回自己就代表成環
+        var visited = new HashSet<Guid>();
+        for (var cursor = parent; cursor is not null && visited.Add(cursor.Id);)
+        {
+            if (cursor.Id == dictId)
+                throw new InvalidOperationException("不能把字典項歸到它自己的下級之下");
+            cursor = cursor.ParentId is { } ancestorId
+                ? items.FirstOrDefault(item => item.Id == ancestorId)
+                  ?? await repo.GetByIdAsync(ancestorId, ct)
+                : null;
+        }
+        return parent;
+    }
 }

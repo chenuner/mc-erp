@@ -207,11 +207,17 @@ public sealed class ErpDbContext(DbContextOptions<ErpDbContext> options) : DbCon
             e.Property(d => d.GroupName).HasMaxLength(50).IsRequired();
             e.Property(d => d.Label).HasMaxLength(100).IsRequired();
             e.Property(d => d.Value).HasMaxLength(50).IsRequired();
+            // 上級字典項：只做導覽，資料庫不建外鍵（migration 會移除 EF 產生的 FK）
+            e.HasOne(d => d.Parent)
+                .WithMany(d => d.Children)
+                .HasForeignKey(d => d.ParentId)
+                .OnDelete(DeleteBehavior.Restrict);
             e.Property(d => d.Sort).HasDefaultValue(0);
             e.Property(d => d.Enabled).HasDefaultValue(true);
             e.Property(d => d.Remark).HasMaxLength(255);
             e.HasIndex(d => d.GroupName).HasDatabaseName("idx_sys_dict_group_name");
             e.HasIndex(d => d.Enabled).HasDatabaseName("idx_sys_dict_enabled");
+            e.HasIndex(d => d.ParentId).HasDatabaseName("idx_sys_dict_parent");
             e.HasQueryFilter(d => !d.IsDeleted);
         });
 

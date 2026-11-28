@@ -136,13 +136,13 @@ public sealed record PayrollDto(Guid Id, Guid WorkerId, string Name, string? Emp
         row.ActualPay, row.TotalAmount, row.Remark);
 }
 
-/// <summary>打卡明細，時間帶 UTC 時區偏移；職位和地盤決定它在薪酬表歸到哪一行。</summary>
+/// <summary>打卡明細，時間帶 UTC 時區偏移；職位和地盤決定它在薪酬表歸到哪一行。字典名稱由前端按 id 映射。</summary>
 public sealed record PunchDto(Guid Id, Guid WorkerId, string Name, string? EmployeeId,
-    Guid SiteDictId, string SiteName, Guid? PositionDictId, string? PositionName,
+    Guid SiteDictId, Guid? PositionDictId,
     DateTimeOffset ClockInTime, DateTimeOffset? ClockOutTime, decimal OvertimeHours, bool IsLaborLeave, string? Remark)
 {
     public static PunchDto From(AttendanceRecord row) => new(row.Id, row.WorkerId, row.Worker.Name, row.Worker.EmployeeId,
-        row.SiteDictId, row.Site.Label, row.PositionDictId, row.Position?.Label,
+        row.SiteDictId, row.PositionDictId,
         new DateTimeOffset(row.ClockInTime, TimeSpan.Zero),
         row.ClockOutTime is { } end ? new DateTimeOffset(end, TimeSpan.Zero) : null,
         row.OvertimeHours, row.IsLaborLeave, row.Remark);

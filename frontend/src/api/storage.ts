@@ -3,8 +3,8 @@ import type { PagedResult } from './system'
 
 export interface FileDto {
   id: string
+  /** 文件類別是系統字典的字典項 id；名稱由前端按 id 映射。 */
   type: string | null
-  typeLabel: string | null
   originalName: string
   contentType: string
   sizeBytes: number

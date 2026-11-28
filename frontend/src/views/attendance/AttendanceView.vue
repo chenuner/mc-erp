@@ -10,6 +10,8 @@ import {
   type AttendanceCardScanDto, type AttendanceCardScanSummaryDto, type AttendanceRow, type PayrollDto,
   type PayrollFields, type PayrollTotals, type PunchDto, type WorkerDto,
 } from '@/api/attendance'
+import DictTreeSelect from '@/components/DictTreeSelect.vue'
+import { dictText } from '@/utils/dicts'
 import type { SysDictDto } from '@/api/system'
 import type { OcrField } from '@/api/accounting'
 
@@ -900,17 +902,11 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
       </div>
       <div v-if="activeTab === 'payroll'" class="filter-field">
         <label for="attendance-position">職位分類</label>
-        <el-select id="attendance-position" v-model="positionFilter" filterable clearable placeholder="全部職位" @change="search">
-          <el-option v-for="position in positions" :key="position.id"
-            :label="position.enabled ? position.label : `${position.label}（停用）`" :value="position.id" />
-        </el-select>
+        <DictTreeSelect id="attendance-position" v-model="positionFilter" :dicts="positions" allow-disabled clearable placeholder="全部職位" @update:model-value="search" />
       </div>
       <div v-if="activeTab === 'payroll'" class="filter-field">
         <label for="attendance-site">地盤</label>
-        <el-select id="attendance-site" v-model="siteFilter" filterable clearable placeholder="全部地盤" @change="search">
-          <el-option v-for="site in sites" :key="site.id"
-            :label="site.enabled ? site.label : `${site.label}（停用）`" :value="site.id" />
-        </el-select>
+        <DictTreeSelect id="attendance-site" v-model="siteFilter" :dicts="sites" allow-disabled clearable placeholder="全部地盤" @update:model-value="search" />
       </div>
       <el-button type="primary" native-type="submit"><AppIcon name="search" :size="16" class="button-icon" />查詢</el-button>
       <el-button v-if="activeTab !== 'cards'" :disabled="loading" @click="resetFilters">重置</el-button>
@@ -924,10 +920,10 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
         class="mc-table-summary" :show-summary="payroll.length > 0" :summary-method="payrollSummary">
         <el-table-column prop="name" label="姓名" width="110" fixed show-overflow-tooltip />
         <el-table-column label="職位分類" width="120" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.position || '—' }}</template>
+          <template #default="{ row }">{{ dictText(row.positionId, row.position, positions) }}</template>
         </el-table-column>
         <el-table-column label="地盤" width="140" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.site || '—' }}</template>
+          <template #default="{ row }">{{ dictText(row.siteDictId, row.site, sites) }}</template>
         </el-table-column>
         <el-table-column v-for="column in columns" :key="column.key" :prop="column.key" :label="column.label"
           :width="column.key === 'totalAmount' ? undefined : column.width"
@@ -955,9 +951,11 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
         <el-table-column prop="name" label="姓名" width="110" fixed show-overflow-tooltip />
         <el-table-column prop="employeeId" label="工號" width="125" />
         <el-table-column label="職位分類" width="120" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.positionName || '—' }}</template>
+          <template #default="{ row }">{{ dictText(row.positionDictId, null, positions) }}</template>
         </el-table-column>
-        <el-table-column prop="siteName" label="地盤" min-width="140" show-overflow-tooltip />
+        <el-table-column label="地盤" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">{{ dictText(row.siteDictId, null, sites) }}</template>
+        </el-table-column>
         <el-table-column label="上班打卡（香港時間）" width="205">
           <template #default="{ row }"><span class="num">{{ localTime(row.clockInTime) }}</span></template>
         </el-table-column>
@@ -1113,12 +1111,8 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
           <div v-if="cardChecked" class="card-step">
             <div class="card-step-title">第 2 步：同步到打卡明細及薪酬表</div>
             <div class="card-sync-fields">
-              <el-select v-model="syncSiteId" filterable placeholder="選擇地盤" class="card-sync-field"
-                no-data-text="尚未配置地盤，請先到「系統字典 → 地盤分類」新增">
-                <el-option v-for="site in sites" :key="site.id"
-                  :label="site.enabled ? site.label : `${site.label}（停用）`"
-                  :value="site.id" :disabled="!site.enabled" />
-              </el-select>
+              <DictTreeSelect v-model="syncSiteId" :dicts="sites" allow-disabled placeholder="選擇地盤" class="card-sync-field"
+                no-data-text="尚未配置地盤，請先到「系統字典 → 地盤分類」新增" />
               <el-button type="primary" :loading="syncing" :disabled="!canSync" @click="syncCard">同步到打卡明細及薪酬表</el-button>
               <span v-if="cardDirty" class="card-sync-note">有未保存的修改，先按「保存修改」</span>
             </div>
@@ -1165,7 +1159,7 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
           <template #default="{ row }">{{ row.employeeId || '—' }}</template>
         </el-table-column>
         <el-table-column label="職位分類" width="120" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.position || '—' }}</template>
+          <template #default="{ row }">{{ dictText(row.positionId, null, positions) }}</template>
         </el-table-column>
         <el-table-column label="日薪（HK$）" width="120" align="right">
           <template #default="{ row }"><span class="num">{{ moneyFormatter.format(row.dailyWage) }}</span></template>
@@ -1199,12 +1193,8 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
             <el-input v-model="workerForm.employeeId" maxlength="50" placeholder="選填" :disabled="workerSaving" />
           </el-form-item>
           <el-form-item label="職位分類">
-            <el-select v-model="workerForm.positionId" clearable filterable placeholder="請選擇" :disabled="workerSaving"
-              no-data-text="尚未配置職位分類，請先到「系統字典 → 職位分類」新增">
-              <el-option v-for="position in positions" :key="position.id"
-                :label="position.enabled ? position.label : `${position.label}（停用）`"
-                :value="position.id" :disabled="!position.enabled && position.id !== workerForm.positionId" />
-            </el-select>
+            <DictTreeSelect v-model="workerForm.positionId" :dicts="positions" clearable :disabled="workerSaving"
+              no-data-text="尚未配置職位分類，請先到「系統字典 → 職位分類」新增" />
             <router-link v-if="!positions.length" to="/system/categories" @click="workerEditDialog = false">
               新增職位分類字典
             </router-link>
@@ -1248,17 +1238,11 @@ const percent = (field: OcrField<unknown>) => field.confidence == null ? '—' :
           <el-date-picker v-model="punchForm.clockOutTime" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" format="YYYY-MM-DD HH:mm:ss" :disabled="saving" />
         </el-form-item>
         <el-form-item label="地盤" prop="siteDictId">
-          <el-select v-model="punchForm.siteDictId" filterable :disabled="saving" placeholder="選擇地盤"
-            no-data-text="尚未配置地盤，請先到「系統字典 → 地盤分類」新增">
-            <el-option v-for="site in sites" :key="site.id"
-              :label="site.enabled ? site.label : `${site.label}（停用）`" :value="site.id" />
-          </el-select>
+          <DictTreeSelect v-model="punchForm.siteDictId" :dicts="sites" allow-disabled :disabled="saving" placeholder="選擇地盤"
+            no-data-text="尚未配置地盤，請先到「系統字典 → 地盤分類」新增" />
         </el-form-item>
         <el-form-item label="職位分類（可選）" prop="positionDictId">
-          <el-select v-model="punchForm.positionDictId" filterable clearable :disabled="saving" placeholder="不指定職位">
-            <el-option v-for="position in positions" :key="position.id"
-              :label="position.enabled ? position.label : `${position.label}（停用）`" :value="position.id" />
-          </el-select>
+          <DictTreeSelect v-model="punchForm.positionDictId" :dicts="positions" allow-disabled clearable :disabled="saving" placeholder="不指定職位" />
         </el-form-item>
         <el-form-item label="O.T.(小時)" prop="overtimeHours"><el-input-number v-model="punchForm.overtimeHours" :precision="2" :min="0" :max="999999.99" :step="0.5" :disabled="saving" /></el-form-item>
         <el-form-item label="勞工假" prop="isLaborLeave"><el-switch v-model="punchForm.isLaborLeave" :disabled="saving" /></el-form-item>

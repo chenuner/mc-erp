@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type TableInstance } from 'element-plus'
 import AppIcon from '@/components/AppIcon.vue'
+import DictTreeSelect from '@/components/DictTreeSelect.vue'
 import {
   createSysDict,
   createSysDictGroup,
@@ -66,6 +67,86 @@ function selectGroup(code: string) {
   void loadItems()
 }
 
+const byId = computed(() => new Map(items.value.map((dict) => [dict.id, dict])))
+const childIds = computed(() => new Set(items.value.map((dict) => dict.parentId).filter((id): id is string => !!id)))
+
+/** 上級字典項；頂層回 null（上級被刪掉時也當頂層處理）。 */
+function parentRow(row: SysDictDto) {
+  return (row.parentId && byId.value.get(row.parentId)) || null
+}
+
+function hasChildren(row: SysDictDto) {
+  return childIds.value.has(row.id)
+}
+
+/**
+ * 表格用樹形顯示（Element Plus 只認 children 欄位，所以在這裡掛上）。
+ * 子項按識別碼「1.1、1.2」自然排序，父項按原來的排序。
+ */
+type TreeNode = SysDictDto & { children: TreeNode[] }
+
+const treeItems = computed(() => {
+  const rows = visibleItems.value.map((dict) => ({ ...dict, children: [] as TreeNode[] }))
+  const nodeById = new Map(rows.map((row) => [row.id, row]))
+  const roots: TreeNode[] = []
+  for (const row of rows) {
+    const parent = row.parentId ? nodeById.get(row.parentId) : undefined
+    if (parent && parent !== row) parent.children.push(row)
+    else roots.push(row)
+  }
+  for (const row of rows) {
+    if (row.children.length) row.children.sort((left, right) => compareCodes(left.value, right.value))
+  }
+  return roots
+})
+
+function compareCodes(left: string, right: string) {
+  return left.localeCompare(right, undefined, { numeric: true })
+}
+
+/** 樹形展開：預設全部展開；用戶收起某些行後，重新載入仍保持收起的狀態。 */
+const tableRef = ref<TableInstance>()
+const expandAll = ref(true)
+/** 用戶手動點開的行（只有預設收起時才有意義）。 */
+const expandedIds = new Set<string>()
+/** 用戶手動收起的行（預設展開時才有意義）。 */
+const collapsedIds = new Set<string>()
+
+function isExpanded(row: SysDictDto) {
+  return expandAll.value ? !collapsedIds.has(row.id) : expandedIds.has(row.id)
+}
+
+function toggleExpanded(row: SysDictDto, expanded: boolean) {
+  const bucket = expandAll.value ? collapsedIds : expandedIds
+  if (expanded) bucket.delete(row.id)
+  else bucket.add(row.id)
+}
+
+function setRowExpanded(row: SysDictDto, expanded: boolean) {
+  toggleExpanded(row, expanded)
+  tableRef.value?.toggleRowExpansion(row, expanded)
+}
+
+function trackExpand(row: SysDictDto, expanded: boolean) {
+  // el-table 的 expand-change 回傳 (row, expanded)，直接以「這一行展開/收起」為準
+  toggleExpanded(row, expanded)
+}
+
+/** 重新載入後表格資料換了，把手動折疊的行重新套用一次。 */
+async function restoreExpandedRows() {
+  await nextTick()
+  for (const item of treeItems.value) {
+    if (item.children.length && !isExpanded(item)) tableRef.value?.toggleRowExpansion(item, false)
+  }
+}
+
+function applyExpandAll(value: string | number | boolean) {
+  expandAll.value = Boolean(value)
+  expandedIds.clear()
+  collapsedIds.clear()
+  void restoreExpandedRows()
+}
+
 async function refreshGroups() {
   const result = await listSysDictGroups()
   groups.value = result
@@ -87,6 +168,7 @@ async function loadItems() {
   } finally {
     itemsLoading.value = false
   }
+  await restoreExpandedRows()
 }
 
 // ---------- 分組 ----------
@@ -176,23 +258,58 @@ const itemForm = reactive({
   sort: 0,
   enabled: true,
   remark: '',
+  // 空字串 = 頂層（下拉清空時就是這個值）
+  parentId: '',
 })
 const itemRules: FormRules<typeof itemForm> = {
   groupName: [{ required: true, message: '請選擇分組', trigger: 'change' }],
   label: [{ required: true, message: '請輸入標籤', trigger: 'blur' }],
 }
 const dialogGroup = computed(() => groups.value.find((group) => group.code === itemForm.groupName) ?? null)
+/**
+ * 可選的上級（畫成樹）：同分組的項都可以當上級，但要排除自己和自己整棵子樹（否則會成環）。
+ */
+const parentDicts = computed(() => {
+  if (!itemForm.groupName) return []
+  const excluded = new Set<string>()
+  if (editingItemId.value) {
+    excluded.add(editingItemId.value)
+    const pending = [editingItemId.value]
+    while (pending.length) {
+      const current = pending.pop()!
+      for (const dict of items.value) {
+        if (dict.parentId === current && !excluded.has(dict.id)) {
+          excluded.add(dict.id)
+          pending.push(dict.id)
+        }
+      }
+    }
+  }
+  return items.value.filter((dict) => !excluded.has(dict.id))
+})
 const nextValuePreview = computed(() => {
   if (editingItemId.value) return itemForm.value
   if (itemForm.groupName !== selectedCode.value) return '自動生成'
+  const parent = itemForm.parentId ? items.value.find((dict) => dict.id === itemForm.parentId) : null
+  if (parent) {
+    // 下級識別碼跟在上級後面：1.1、1.2…
+    const prefix = `${parent.value}.`
+    const max = items.value.reduce((result, dict) => {
+      if (!dict.value.startsWith(prefix)) return result
+      const parsed = Number.parseInt(dict.value.slice(prefix.length), 10)
+      return Number.isNaN(parsed) ? result : Math.max(result, parsed)
+    }, 0)
+    return `${prefix}${max + 1}`
+  }
   const max = items.value.reduce((result, dict) => {
+    if (dict.parentId) return result
     const parsed = Number.parseInt(dict.value, 10)
     return Number.isNaN(parsed) ? result : Math.max(result, parsed)
   }, 0)
   return String(max + 1)
 })
 
-function openItemCreate() {
+function openItemCreate(parentId: string | null = null) {
   editingItemId.value = null
   itemForm.groupName = selectedCode.value
   itemForm.label = ''
@@ -200,7 +317,14 @@ function openItemCreate() {
   itemForm.sort = 0
   itemForm.enabled = true
   itemForm.remark = ''
+  // 從某一行按「加下級」時直接帶入上級
+  itemForm.parentId = parentId && items.value.some((dict) => dict.id === parentId) ? parentId : ''
   itemDialogVisible.value = true
+}
+
+/** 行內「加下級」：沿用該行的分組，上級就是該行。 */
+function addChild(row: SysDictDto) {
+  openItemCreate(row.id)
 }
 
 function openItemEdit(row: SysDictDto) {
@@ -211,6 +335,7 @@ function openItemEdit(row: SysDictDto) {
   itemForm.sort = row.sort
   itemForm.enabled = row.enabled
   itemForm.remark = row.remark ?? ''
+  itemForm.parentId = row.parentId ?? ''
   itemDialogVisible.value = true
 }
 
@@ -220,20 +345,25 @@ async function submitItem() {
   itemSubmitting.value = true
   try {
     const remark = itemForm.remark.trim()
+    const parentId = itemForm.parentId || null
     if (editingItemId.value) {
-      await updateSysDict(editingItemId.value, {
+      const parentChanged = parentId !== (items.value.find((dict) => dict.id === editingItemId.value)?.parentId ?? null)
+      const updated = await updateSysDict(editingItemId.value, {
         label: itemForm.label.trim(),
         sort: itemForm.sort,
         enabled: itemForm.enabled,
         remark,
+        // 只有真的換了層級才送 parentId，避免無謂改寫識別碼
+        ...(parentChanged ? { parentId } : {}),
       })
-      ElMessage.success('字典項已更新')
+      ElMessage.success(parentChanged ? `字典項已更新，識別碼重新編為 ${updated.value}` : '字典項已更新')
     } else {
       await createSysDict({
         groupName: itemForm.groupName,
         label: itemForm.label.trim(),
         enabled: itemForm.enabled,
         remark: remark || null,
+        parentId,
       })
       selectedCode.value = itemForm.groupName
       ElMessage.success('字典項已建立，識別碼由系統自動分配')
@@ -406,7 +536,7 @@ onMounted(async () => {
           <div class="items-actions">
             <el-button link type="primary" @click="openGroupEdit">編輯分組</el-button>
             <el-button v-if="!selectedGroup.isSystem" link type="danger" :disabled="selectedGroup.itemCount > 0" @click="removeGroup">刪除分組</el-button>
-            <el-button type="primary" @click="openItemCreate">
+            <el-button type="primary" @click="openItemCreate()">
               <AppIcon name="plus" :size="14" style="margin-right: 4px" />新增字典項
             </el-button>
           </div>
@@ -430,9 +560,21 @@ onMounted(async () => {
             <el-radio-button value="enabled">啟用</el-radio-button>
             <el-radio-button value="disabled">停用</el-radio-button>
           </el-radio-group>
+          <div class="tree-switch">
+            <el-switch v-model="expandAll" active-text="展開全部" @change="applyExpandAll" />
+          </div>
         </div>
 
-        <el-table v-loading="itemsLoading" :data="visibleItems" row-key="id" stripe>
+        <!-- 有上級關係時用樹形顯示：地盤「牛房」底下掛「一樓」「二樓」 -->
+        <el-table
+          ref="tableRef"
+          v-loading="itemsLoading"
+          :data="treeItems"
+          row-key="id"
+          :default-expand-all="expandAll"
+          :tree-props="{ children: 'children' }"
+          @expand-change="trackExpand"
+        >
           <el-table-column type="index" label="#" width="48" align="center" />
           <el-table-column label="排序" width="80" align="center">
             <template #default="{ row }">
@@ -451,10 +593,12 @@ onMounted(async () => {
               <div class="dict-label">
                 {{ row.label }}
                 <el-tag v-if="isRequiredDict(row)" size="small" type="warning" effect="plain">上傳必需</el-tag>
+                <el-tag v-if="hasChildren(row)" size="small" type="info" effect="plain">上級</el-tag>
               </div>
               <div class="dict-code">
                 識別碼 {{ row.value }}
-                <span v-if="selectedGroup.isSystem" class="dict-lock">· 識別碼不可改</span>
+                <span v-if="row.parentId" class="dict-sub">· 下級 {{ parentRow(row)?.label ?? '（上級已刪）' }} 的下級</span>
+                <span v-else-if="selectedGroup.isSystem" class="dict-lock">· 識別碼不可改</span>
               </div>
             </template>
           </el-table-column>
@@ -470,9 +614,10 @@ onMounted(async () => {
               />
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="140" align="center" fixed="right" class-name="actions-cell">
+          <el-table-column label="操作" width="190" align="center" fixed="right" class-name="actions-cell">
             <template #default="{ row }">
               <el-button link type="primary" @click="openItemEdit(row)">編輯</el-button>
+              <el-button link type="primary" @click="addChild(row)">加下級</el-button>
               <el-tooltip v-if="isRequiredDict(row)" content="票據上傳流程必需，不能刪除" placement="top">
                 <span class="locked-action"><AppIcon name="lock" :size="12" />不可刪除</span>
               </el-tooltip>
@@ -481,7 +626,7 @@ onMounted(async () => {
           </el-table-column>
           <template #empty>
             <el-empty :description="itemKeyword || statusFilter !== 'all' ? '沒有符合的字典項' : '此分組還沒有字典項'">
-              <el-button v-if="!itemKeyword && statusFilter === 'all'" type="primary" @click="openItemCreate">
+              <el-button v-if="!itemKeyword && statusFilter === 'all'" type="primary" @click="openItemCreate()">
                 新增第一個字典項
               </el-button>
             </el-empty>
@@ -547,17 +692,26 @@ onMounted(async () => {
         <el-form-item label="標籤" prop="label">
           <el-input v-model="itemForm.label" maxlength="100" placeholder="用戶看到的文字，例如：材料" />
         </el-form-item>
+        <el-form-item label="上級（可選）">
+          <DictTreeSelect
+            v-model="itemForm.parentId"
+            :dicts="parentDicts"
+            clearable
+            placeholder="不選 = 頂層"
+            :disabled="!!editingItemId && childIds.has(editingItemId)"
+          />
+          <div class="form-hint">
+            例如地盤「牛房」是頂層，「一樓」「二樓」的上級選「牛房」；識別碼會自動編成 1.1、1.2。
+            有下級的項要先清空下級才能換上級。
+          </div>
+        </el-form-item>
         <el-form-item label="識別碼">
           <el-input :model-value="editingItemId ? itemForm.value : nextValuePreview" disabled />
           <div class="form-hint">
             <template v-if="editingItemId">
-              {{
-                dialogGroup?.isSystem
-                  ? '系統內建分組的識別碼不可修改。'
-                  : '識別碼建立後不可修改，避免影響已引用它的資料。'
-              }}
+              識別碼由系統按層級自動生成（頂層 1、2，下級 1.1、1.2），不可手動修改；換上級時會自動重新編號。
             </template>
-            <template v-else>由系統自動編號（1、2、3…），不需要手動輸入。</template>
+            <template v-else>由系統自動編號（頂層 1、2、3…，下級 1.1、1.2…），不需要手動輸入。</template>
           </div>
         </el-form-item>
         <el-form-item v-if="editingItemId" label="排序" prop="sort">
@@ -795,8 +949,24 @@ onMounted(async () => {
   font-variant-numeric: tabular-nums;
 }
 
+/* 子行的縮進稍寬一點，讓「誰是誰的下級」一眼看得出來 */
+:deep(.el-table__indent) {
+  padding-right: 6px !important;
+}
+
 .dict-lock {
   color: var(--mc-primary);
+}
+
+.dict-sub {
+  color: var(--mc-text-secondary);
+}
+
+.tree-switch {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .locked-action {

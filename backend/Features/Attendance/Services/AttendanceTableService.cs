@@ -1,5 +1,6 @@
 using MC.Erp.Data;
 using MC.Erp.Features.Attendance.Entities;
+using MC.Erp.Features.System.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace MC.Erp.Features.Attendance.Services;
@@ -27,22 +28,23 @@ public readonly record struct PunchPayrollState(int Year, int Month, decimal Ove
     }
 }
 
-public sealed class AttendanceTableService(ErpDbContext db)
+public sealed class AttendanceTableService(ErpDbContext db, SysDictService dicts)
 {
     /// <summary>
     /// 薪酬表篩選條件；列表、筆數和合計共用同一份，口徑不會漂移。
-    /// 職位和地盤都按當月快照篩（改字典名稱不影響已生成的月份）。
+    /// 職位和地盤都按當月快照篩（改字典名稱不影響已生成的月份）；
+    /// positions／sites 傳「自己 + 整棵子樹」的 id 清單（GetPayrollAsync 預先擴張），null = 不篩。
     /// </summary>
-    private IQueryable<MonthlyWorkSummary> PayrollQuery(int year, int month, Guid? workerId, Guid? positionId,
-        Guid? siteDictId)
+    private IQueryable<MonthlyWorkSummary> PayrollQuery(int year, int month, Guid? workerId,
+        List<Guid>? positions, List<Guid>? sites)
     {
         var query = db.MonthlyWorkSummaries.AsNoTracking()
             .Where(s => s.Year == year && s.Month == month && !s.Worker.IsDeleted);
         if (workerId is { } selected && selected != Guid.Empty) query = query.Where(s => s.WorkerId == selected);
-        if (positionId is { } selectedPosition && selectedPosition != Guid.Empty)
-            query = query.Where(s => s.PositionDictId == selectedPosition);
-        if (siteDictId is { } selectedSite && selectedSite != Guid.Empty)
-            query = query.Where(s => s.SiteDictId == selectedSite);
+        if (positions is not null)
+            query = query.Where(s => s.PositionDictId != null && positions.Contains(s.PositionDictId.Value));
+        if (sites is not null)
+            query = query.Where(s => s.SiteDictId != null && sites.Contains(s.SiteDictId.Value));
         return query;
     }
 
@@ -57,19 +59,24 @@ public sealed class AttendanceTableService(ErpDbContext db)
 
     /// <summary>
     /// 薪酬表查詢；workerId 有值就只看該員工（姓名下拉選的是 id，重名也不會混在一起），
-    /// positionId／siteDictId 有值就只看該月快照符合的行。合計不含日薪。
+    /// positionId／siteDictId 有值就連同其下級一起看該月快照符合的行。合計不含日薪。
     /// 一個員工一個月可能有多行（按職位 × 地盤分組），合計把它們加在一起。
     /// </summary>
     public async Task<(List<MonthlyWorkSummary> Items, int Total, PayrollTotals Totals)> GetPayrollAsync(
         int year, int month, Guid? workerId, Guid? positionId, Guid? siteDictId, int page, int pageSize,
         CancellationToken ct)
     {
-        var query = PayrollQuery(year, month, workerId, positionId, siteDictId);
+        // 列表篩選一律含下級：選「牛房」要連「牛房 · 一樓」的行一起算；擴張一次，列表和合計共用
+        var positions = positionId is { } selectedPosition && selectedPosition != Guid.Empty
+            ? await dicts.SubtreeIdsAsync(selectedPosition, ct) : null;
+        var sites = siteDictId is { } selectedSite && selectedSite != Guid.Empty
+            ? await dicts.SubtreeIdsAsync(selectedSite, ct) : null;
+        var query = PayrollQuery(year, month, workerId, positions, sites);
         var total = await query.CountAsync(ct);
         var items = await query.Include(s => s.Worker)
             .OrderBy(s => s.Worker.Name).ThenBy(s => s.Position).ThenBy(s => s.Site).ThenBy(s => s.Id)
             .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
-        var totals = await PayrollQuery(year, month, workerId, positionId, siteDictId)
+        var totals = await PayrollQuery(year, month, workerId, positions, sites)
             .GroupBy(_ => 1)
             .Select(group => new PayrollTotals(
                 group.Sum(s => s.WorkDays), group.Sum(s => s.LaborLeaveDays), group.Sum(s => s.TotalWorkDays),

@@ -8,9 +8,8 @@ export interface WorkerDto {
   employeeId: string | null
   dailyWage: number
   isActive: boolean
-  /** 職位分類（AttendancePosition 字典），可為空。 */
+  /** 職位分類（AttendancePosition 字典）的字典項 id，可為空；名稱由前端按 id 映射。 */
   positionId: string | null
-  position: string | null
 }
 
 /** 考勤卡同步時選員工用；日薪就是計薪用的日薪。 */
@@ -89,8 +88,6 @@ export interface PunchDto extends PunchFields {
   workerId: string
   name: string
   employeeId: string | null
-  siteName: string
-  positionName: string | null
 }
 
 export interface AttendanceQuery {
@@ -279,7 +276,6 @@ export interface CardSyncResult {
   workerName: string
   /** 地盤是系統字典 AccountingSiteCategory 的字典項 id。 */
   siteDictId: string
-  siteName: string
   addedRecords: number
   rows: CardPayrollRow[]
 }

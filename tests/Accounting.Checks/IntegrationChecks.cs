@@ -147,7 +147,7 @@ internal static class IntegrationChecks
             // 手動錄入：沒有原圖也可以先建票據
             var manual = await Create(documentId);
             Check(manual.FileItemId == null && manual.FileName == null, "manual receipt has no image");
-            Check(manual.Type == pendingId && manual.TypeLabel == "待分類", "manual receipt starts as pending category");
+            Check(manual.Type == pendingId, "manual receipt starts as pending category");
             Check(manual.OcrStatus == "NotStarted", "manual receipt starts without OCR");
             using (var invalidForm = new MultipartFormDataContent())
             {
@@ -212,7 +212,7 @@ internal static class IntegrationChecks
             first = await Save(first, categoryB, new DateOnly(2026, 1, 1));
             second = await Save(second, categoryA, new DateOnly(2026, 12, 31));
             manual = await Save(manual, categoryB, new DateOnly(2026, 6, 1));
-            Check(manual.FileItemId == null && manual.Type == materialId && manual.TypeLabel == "材料", "manual receipt saves category without image");
+            Check(manual.FileItemId == null && manual.Type == materialId, "manual receipt saves category without image");
             using (var staleSave = await client.PutAsJsonAsync($"accounting/receipts/{first.Id}",
                 new UpdateReceiptRequest(staleVersion, documentId, materialId, categoryB, new DateOnly(2026, 1, 1), 1m, "HKD", null, null, null)))
                 Check(staleSave.StatusCode == HttpStatusCode.Conflict, "stale edit rejected");
@@ -344,6 +344,51 @@ internal static class IntegrationChecks
             Check(filtered.GetProperty("total").GetInt32() == 3, "disabled category history retained");
             using (var deleteDictOne = await client.DeleteAsync($"system/dicts/{dictOneId}")) deleteDictOne.EnsureSuccessStatusCode();
             using (var deleteDictTwo = await client.DeleteAsync($"system/dicts/{dictTwoId}")) deleteDictTwo.EnsureSuccessStatusCode();
+            // 多層結構：<上級>.<流水> 識別碼、自引用禁止、有下級不能刪
+            var siteGroup = (await Post("system/dict-groups", new { name = "Hierarchy Check" })).GetProperty("code").GetString()!;
+            var barn = await Post("system/dicts", new { groupName = siteGroup, label = "1" });
+            var barnId = barn.GetProperty("id").GetGuid();
+            Check(barn.GetProperty("parentId").ValueKind == JsonValueKind.Null, "top-level dict has no parent");
+            var floorOne = await Post("system/dicts", new { groupName = siteGroup, label = "1.1", parentId = barnId });
+            var floorTwo = await Post("system/dicts", new { groupName = siteGroup, label = "1.2", parentId = barnId });
+            Check(floorOne.GetProperty("value").GetString() == "1.1" && floorTwo.GetProperty("value").GetString() == "1.2",
+                "child dict values follow parent code");
+            Check(floorOne.GetProperty("parentId").GetGuid() == barnId, "child parent persisted");
+            var other = await Post("system/dicts", new { groupName = siteGroup, label = "2" });
+            var grandChild = await Post("system/dicts", new { groupName = siteGroup, label = "1.1.1", parentId = floorOne.GetProperty("id").GetGuid() });
+            Check(grandChild.GetProperty("value").GetString() == "1.1.1", "grandchild dict value nested");
+            using (var cycle = await client.PutAsJsonAsync($"system/dicts/{barnId}", new { parentId = floorOne.GetProperty("id").GetGuid() }))
+                Check(cycle.StatusCode == HttpStatusCode.BadRequest, "dict cannot become its own descendant");
+            using (var deleteParent = await client.DeleteAsync($"system/dicts/{barnId}"))
+                Check(deleteParent.StatusCode == HttpStatusCode.Conflict, "dict with children cannot be deleted");
+            using (var lockValue = await client.PutAsJsonAsync($"system/dicts/{barnId}", new { value = "9" }))
+                Check(lockValue.StatusCode == HttpStatusCode.BadRequest, "dict value is system generated");
+            var floorTwoId = floorTwo.GetProperty("id").GetGuid();
+            using (var moved = await client.PutAsJsonAsync($"system/dicts/{floorTwoId}", new { parentId = other.GetProperty("id").GetGuid() }))
+            {
+                Check(moved.StatusCode == HttpStatusCode.OK, "child can be moved to another parent");
+                Check((await moved.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("value").GetString() == "2.1",
+                    "moved child gets renumbered");
+            }
+            using (var unparent = await client.PutAsJsonAsync($"system/dicts/{floorTwoId}", new { parentId = (Guid?)null }))
+            {
+                Check(unparent.StatusCode == HttpStatusCode.OK, "child can be moved to top level");
+                Check((await unparent.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("value").GetString() == "3",
+                    "unparented dict gets top-level code");
+            }
+            // 列表篩選一律含下級：選上級地盤要連下級的票據一起算；只有導出才給「包含下級」開關
+            var siteParent = await Post("system/dicts", new { groupName = "AccountingSiteCategory", label = "Export Parent" });
+            var siteParentId = siteParent.GetProperty("id").GetGuid();
+            var siteChild = await Post("system/dicts", new { groupName = "AccountingSiteCategory", label = "Export Child", parentId = siteParentId });
+            var nested = await Upload(documentId, png);
+            nested = await Save(nested, siteChild.GetProperty("id").GetGuid(), new DateOnly(2026, 4, 1));
+            var nestedTotal = await Get($"accounting/receipts?siteCategoryDictId={siteParentId}");
+            Check(nestedTotal.GetProperty("total").GetInt32() == 1, "site filter includes descendant categories");
+            await using (var nestedZip = await client.GetStreamAsync($"accounting/receipts/export?siteCategoryDictId={siteParentId}"))
+            using (var archive = new ZipArchive(nestedZip, ZipArchiveMode.Read))
+                Check(archive.Entries.Count == 1, "export includes descendant categories by default");
+            using (var exact = await client.GetAsync($"accounting/receipts/export?siteCategoryDictId={siteParentId}&includeDescendants=false"))
+                Check(exact.StatusCode == HttpStatusCode.NotFound, "export without descendants only takes the exact category");
             using (var deleteEmptyGroup = await client.DeleteAsync($"system/dict-groups/{customGroupId}"))
                 Check(deleteEmptyGroup.StatusCode == HttpStatusCode.NoContent, "empty group can be deleted");
             File.Delete(Directory.GetFiles(temporaryRoot).First());

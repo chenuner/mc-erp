@@ -27,10 +27,24 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
     IOcrService ocr, ILogger<ReceiptService> logger)
 {
     public bool OcrConfigured => ocr.IsConfigured;
-    public Task<(List<ReceiptListItem> Items, int Total, ReceiptTotals Totals)> ListAsync(ReceiptFilter filter, int page, int pageSize)
-        => repo.ListAsync(filter, page, pageSize);
+
+    /// <summary>列表篩選一律含下級：選「牛房」要連「牛房 · 一樓」的票據一起算，與樹形下拉口徑一致。</summary>
+    public async Task<(List<ReceiptListItem> Items, int Total, ReceiptTotals Totals)> ListAsync(
+        ReceiptFilter filter, int page, int pageSize, CancellationToken ct = default)
+        => await repo.ListAsync(await ExpandFilterAsync(filter, ct), page, pageSize);
+
     /// <summary>詳情：只投影需要的欄位，打開詳情才拉 OCR 原文。</summary>
     public async Task<ReceiptDetail> FindAsync(Guid id) => await repo.FindDetailAsync(id) ?? throw new KeyNotFoundException("票據不存在");
+
+    /// <summary>把篩選裡的單一字典 id 換成「自己 + 整棵子樹」；子樹按 ParentId 走，不按識別碼前綴（識別碼會重新編號）。</summary>
+    private async Task<ReceiptFilter> ExpandFilterAsync(ReceiptFilter filter, CancellationToken ct = default) => new(
+        await ExpandIdsAsync(filter.DocumentTypeDictIds, ct),
+        await ExpandIdsAsync(filter.TypeIds, ct),
+        await ExpandIdsAsync(filter.SiteCategoryDictIds, ct),
+        filter.Start, filter.End);
+
+    private async Task<List<Guid>?> ExpandIdsAsync(List<Guid>? ids, CancellationToken ct)
+        => ids is not { Count: 1 } ? ids : await dicts.SubtreeIdsAsync(ids[0], ct);
     /// <summary>寫入用：需要追蹤的整行實體（保存、識別、刪除）。</summary>
     private async Task<Receipt> FindTrackedAsync(Guid id) => await repo.FindTrackedAsync(id) ?? throw new KeyNotFoundException("票據不存在");
 
@@ -234,16 +248,43 @@ public sealed class ReceiptService(ReceiptRepository repo, FileService files, Sy
         return matches.Count == 1 ? matches[0] : null;
     }
 
-    public async Task<(Stream Content, string Name)> ExportAsync(ReceiptFilter filter)
+    /// <summary>提取圖片（ZIP）。includeDescendants=false 時不做子樹擴張，只查精確分類。</summary>
+    public async Task<(Stream Content, string Name)> ExportAsync(ReceiptFilter filter, bool includeDescendants = true,
+        CancellationToken ct = default)
     {
-        var receipts = await repo.ExportAsync(filter);
+        var expanded = includeDescendants ? await ExpandFilterAsync(filter, ct) : filter;
+        var receipts = await repo.ExportAsync(expanded);
         if (receipts.Count == 0) throw new KeyNotFoundException("沒有符合條件的圖片");
         if (receipts.Count > 5000 || receipts.Sum(receipt => receipt.SizeBytes) > 250L * 1024 * 1024)
             throw new InvalidOperationException("提取上限為 5000 張 / 250 MB，請縮小日期範圍");
-        var entries = receipts.Select(receipt => (receipt.FileItemId,
-            $"{SafeName(receipt.SiteCategoryLabel ?? "未分類地盤")}/{SafeName(receipt.TypeLabel)}/"
-                + $"{receipt.ReceiptDate:yyyy-MM-dd}_{receipt.Id:N}_{SafeName(receipt.FileName)}")).ToList();
+        var siteDicts = await dicts.ListByGroupAsync("AccountingSiteCategory", ct);
+        var typeDicts = await dicts.ListByGroupAsync("Accounting", ct);
+        var entries = receipts.Select(receipt =>
+        {
+            // 文件夾用完整路徑（牛房 / 一樓），兩個上級底下的同名樓層不會擠進同一個文件夾
+            var site = string.Join("/", FolderLabels(receipt.SiteCategoryDictId, receipt.SiteCategoryLabel, siteDicts).Select(SafeName));
+            var type = string.Join("/", FolderLabels(receipt.Type, receipt.TypeLabel, typeDicts).Select(SafeName));
+            return (receipt.FileItemId, $"{site}/{type}/"
+                + $"{receipt.ReceiptDate:yyyy-MM-dd}_{receipt.Id:N}_{SafeName(receipt.FileName)}");
+        }).ToList();
         return (await files.打包Async(entries), $"accounting-{DateTime.UtcNow:yyyyMMdd-HHmmss}.zip");
+    }
+
+    /// <summary>ZIP 文件夾的逐層標籤：字典項存在就回「牛房、一樓」整條路徑，否則退回保存的名稱快照。</summary>
+    private static List<string> FolderLabels(Guid? id, string? fallback, List<SysDict> dicts)
+    {
+        var byId = dicts.ToDictionary(dict => dict.Id);
+        var dict = id is null ? null : byId.GetValueOrDefault(id.Value);
+        if (dict is null) return [fallback ?? "未分類"];
+        var labels = new List<string> { dict.Label };
+        var seen = new HashSet<Guid> { dict.Id };
+        var parentId = dict.ParentId;
+        while (parentId is { } current && seen.Add(current) && byId.TryGetValue(current, out var parent))
+        {
+            labels.Insert(0, parent.Label);
+            parentId = parent.ParentId;
+        }
+        return labels;
     }
 
     public static string SafeName(string name)

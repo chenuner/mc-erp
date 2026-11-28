@@ -68,9 +68,11 @@ public sealed class FileService(ErpDbContext db, IFileStorage storage, ICurrentU
 
     public async Task<(List<FileItem> Items, int Total)> 列表Async(Guid? type, int page, int pageSize, CancellationToken ct)
     {
+        // 列表篩選一律含下級：選上級類別 = 連子類別一起查（子樹按 ParentId 走，識別碼會重新編號）
+        var types = type is null ? null : await dictService.SubtreeIdsAsync(type.Value, ct);
         var query = db.FileItems
             .AsNoTracking()
-            .Where(f => !f.IsDeleted && (type == null || f.Type == type))
+            .Where(f => !f.IsDeleted && (types == null || (f.Type != null && types.Contains(f.Type.Value))))
             .Where(f => user.IsInRole("Admin") || f.TypeDict == null || f.TypeDict.GroupName != "Accounting");
         var total = await query.CountAsync(ct);
         // 批量上傳的時間戳常常相同，加 Id 當次序，分頁才不會重複或漏行

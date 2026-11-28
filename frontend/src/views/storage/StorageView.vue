@@ -2,7 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, type UploadFiles, type UploadInstance, type UploadRequestOptions } from 'element-plus'
 import AppIcon from '@/components/AppIcon.vue'
+import DictTreeSelect from '@/components/DictTreeSelect.vue'
 import { listSysDictGroups, listSysDicts, type SysDictDto, type SysDictGroupDto } from '@/api/system'
+import { dictText } from '@/utils/dicts'
 import {
   deleteFile,
   downloadFile,
@@ -57,11 +59,6 @@ function formatSize(bytes: number): string {
 
 function formatDate(iso: string): string {
   return iso.slice(0, 10)
-}
-
-function dictLabel(dict: SysDictDto): string {
-  const groupName = dictGroups.value.find((group) => group.code === dict.groupName)?.name ?? dict.groupName
-  return `${groupName} / ${dict.label}`
 }
 
 interface FileTypeInfo {
@@ -361,22 +358,16 @@ onMounted(async () => {
 
     <!-- 工具欄 -->
     <div class="toolbar mc-card">
-      <el-select
+      <DictTreeSelect
         v-model="filterType"
+        :dicts="dicts"
+        :groups="dictGroups"
+        allow-disabled
+        clearable
         placeholder="按文件類別篩選"
         aria-label="文件類別"
-        :loading="dictLoading"
-        filterable
-        clearable
         style="width: 280px"
-      >
-        <el-option
-          v-for="dict in dicts"
-          :key="dict.id"
-          :value="dict.id"
-          :label="dictLabel(dict)"
-        />
-      </el-select>
+      />
 
       <div class="toolbar-spacer" />
 
@@ -398,7 +389,7 @@ onMounted(async () => {
           </template>
         </el-table-column>
         <el-table-column label="文件類別" min-width="140">
-          <template #default="{ row }">{{ row.typeLabel ?? '—' }}</template>
+          <template #default="{ row }">{{ dictText(row.type, null, dicts) }}</template>
         </el-table-column>
         <el-table-column label="格式" width="90" align="center">
           <template #default="{ row }">
@@ -454,7 +445,7 @@ onMounted(async () => {
           <div class="card-body">
             <div class="card-name" :title="f.originalName">{{ f.originalName }}</div>
             <div class="card-meta">
-              <span>{{ f.typeLabel ?? '—' }}</span>
+              <span>{{ dictText(f.type, null, dicts) }}</span>
               <span class="dot">·</span>
               <span class="num">{{ formatSize(f.sizeBytes) }}</span>
             </div>
@@ -492,14 +483,7 @@ onMounted(async () => {
     >
       <el-form label-position="top">
         <el-form-item label="文件類別" required>
-          <el-select v-model="uploadType" placeholder="選擇系統字典項" filterable style="width: 100%" :disabled="uploading">
-            <el-option
-              v-for="dict in enabledDicts"
-              :key="dict.id"
-              :value="dict.id"
-              :label="dictLabel(dict)"
-            />
-          </el-select>
+          <DictTreeSelect v-model="uploadType" :dicts="enabledDicts" :groups="dictGroups" placeholder="選擇系統字典項" :disabled="uploading" />
         </el-form-item>
         <el-form-item label="文件">
           <el-upload

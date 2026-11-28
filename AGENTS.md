@@ -60,7 +60,7 @@ MC ERP — 香港建築管理公司 ERP 系統。簡單系統，不過度工程�
 | 考勤檢查 | `dotnet run --project tests/Attendance.Checks/Attendance.Checks.csproj -c Release` |
 | 整合檢查（需資料庫） | `dotnet run --project tests/Accounting.Checks/Accounting.Checks.csproj -c Release -- --integration` |
 | 前端型別 + 建置 | `pnpm -C frontend run build` |
-| 前端裁剪工具檢查 | `pnpm -C frontend run check` |
+| 前端純函數檢查（裁剪 / 字典層級） | `pnpm -C frontend run check` |
 
 > 三個 Checks 共用 `backend` 的 Release 輸出，**不可並行**，否則 CS2012。
 >
