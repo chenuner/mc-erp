@@ -1,0 +1,40 @@
+@baseUrl = http://localhost:5209
+@token = REPLACE_WITH_LOCAL_ADMIN_TOKEN
+@typeId = REPLACE_WITH_DICT_ID
+@fileId = REPLACE_WITH_FILE_ID
+
+### 可以當文件類別的字典（只回白名單分組，含停用項）
+GET {{baseUrl}}/api/storage/types
+Authorization: Bearer {{token}}
+
+### 文件列表：不傳 type = 全部
+GET {{baseUrl}}/api/storage/files?page=1&pageSize=20
+Authorization: Bearer {{token}}
+
+### 文件列表：按字典項篩選（選上級＝連同整棵子樹）
+GET {{baseUrl}}/api/storage/files?type={{typeId}}
+Authorization: Bearer {{token}}
+
+### 文件列表：按整個分組篩選（分組沒有字典項 id，所以用 group: 前綴）
+GET {{baseUrl}}/api/storage/files?type=group:Accounting
+Authorization: Bearer {{token}}
+
+### 上傳：type 必須在 query string，且屬於白名單分組
+POST {{baseUrl}}/api/storage/files?type={{typeId}}
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=----mc-erp
+
+------mc-erp
+Content-Disposition: form-data; name="file"; filename="sample.txt"
+Content-Type: text/plain
+
+hello mc-erp
+------mc-erp--
+
+### 下載原文件
+GET {{baseUrl}}/api/storage/files/{{fileId}}/download
+Authorization: Bearer {{token}}
+
+### 刪除（軟刪除；被會計票據引用的圖片不能刪）
+DELETE {{baseUrl}}/api/storage/files/{{fileId}}
+Authorization: Bearer {{token}}

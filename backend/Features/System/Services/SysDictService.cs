@@ -41,6 +41,12 @@ public sealed class SysDictService(ISysDictRepository repo, ISysDictGroupReposit
     }
 
     /// <summary>
+    /// 某一分組的全部字典 id（含停用項）：文件庫按「分組」篩選時整組一起查（分組本身不是字典項，沒有 id）。
+    /// </summary>
+    public async Task<List<Guid>> GroupDictIdsAsync(string groupName, CancellationToken ct = default)
+        => (await repo.ListByGroupAsync(groupName, ct)).Select(dict => dict.Id).ToList();
+
+    /// <summary>
     /// 寫入用：分類必須存在、屬於指定分組、自己啟用，而且每個上級都啟用。
     /// 上級停用代表整條分支都不再使用，所以下級一併不可選（歷史資料照樣顯示，不影響查詢與匯出）。
     /// </summary>

@@ -3,13 +3,14 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, type UploadFiles, type UploadInstance, type UploadRequestOptions } from 'element-plus'
 import AppIcon from '@/components/AppIcon.vue'
 import DictTreeSelect from '@/components/DictTreeSelect.vue'
-import { listSysDictGroups, listSysDicts, type SysDictDto, type SysDictGroupDto } from '@/api/system'
+import { type SysDictDto, type SysDictGroupDto } from '@/api/system'
 import { dictText } from '@/utils/dicts'
 import {
   deleteFile,
   downloadFile,
   getFileBlob,
   listFiles,
+  listStorageTypes,
   uploadFile,
   type FileDto,
 } from '@/api/storage'
@@ -25,17 +26,10 @@ const enabledDicts = computed(() => dicts.value.filter((dict) => dict.enabled))
 async function fetchDicts() {
   dictLoading.value = true
   try {
-    const items: SysDictDto[] = []
-    let page = 1
-    let total = 0
-    do {
-      const result = await listSysDicts(page++, 100)
-      items.push(...result.items)
-      total = result.total
-      if (result.items.length === 0) break
-    } while (items.length < total)
-    dicts.value = items
-    dictGroups.value = await listSysDictGroups()
+    // 只拿「可以當文件類別」的幾個分組（後端白名單），不再把整份字典拉下來
+    const result = await listStorageTypes()
+    dicts.value = result.dicts
+    dictGroups.value = result.groups
   } catch {
     /* 攔截器已提示 */
   } finally {
@@ -363,6 +357,7 @@ onMounted(async () => {
         :dicts="dicts"
         :groups="dictGroups"
         allow-disabled
+        selectable-groups
         clearable
         placeholder="按文件類別篩選"
         aria-label="文件類別"

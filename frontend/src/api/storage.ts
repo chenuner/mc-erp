@@ -1,5 +1,5 @@
 import request from './request'
-import type { PagedResult } from './system'
+import type { PagedResult, SysDictDto, SysDictGroupDto } from './system'
 
 export interface FileDto {
   id: string
@@ -13,7 +13,20 @@ export interface FileDto {
   md5: string | null
 }
 
-/** 文件列表：按上傳時間倒序分頁，一頁預設 20 筆。 */
+/** 可以當文件類別的字典（只含後端白名單分組）：篩選與上傳都用這份建樹。 */
+export interface StorageTypesDto {
+  groups: SysDictGroupDto[]
+  dicts: SysDictDto[]
+}
+
+export async function listStorageTypes(): Promise<StorageTypesDto> {
+  return (await request.get('/storage/types')) as StorageTypesDto
+}
+
+/**
+ * 文件列表：按上傳時間倒序分頁，一頁預設 20 筆。
+ * `type` 可以是字典項 id（含下級子樹）或 `group:<分組代碼>`（整個分組）。
+ */
 export async function listFiles(type?: string, page = 1, pageSize = 20): Promise<PagedResult<FileDto>> {
   return (await request.get('/storage/files', {
     params: { ...(type ? { type } : {}), page, pageSize },

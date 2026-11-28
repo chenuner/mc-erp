@@ -23,9 +23,9 @@
 | Attendance | 外部打卡 API 同步 | ❌ 未實現 | — |
 | Attendance | 考勤卡照片掃描（prebuilt-layout → 逐行打卡並落庫，每欄帶置信度；手寫年月姓名不計入複核，可雙擊人工修正；兩步流程：先「標記為已核對」，成功後才出現「同步」，按「同步」導入打卡明細並重算該員工該月薪酬；未核對不能同步，改過內容要重新按「標記為已核對」） | ✅ 可用（與票據共用 Azure 憑據，需配置才啟用） | `POST /api/attendance/scan`、`GET /api/attendance/scans`、`PUT /api/attendance/scans/{id}`、`POST /api/attendance/scans/{id}/confirm`、`POST /api/attendance/scans/{id}/sync` |
 | Accounting | 手動新增票據、上傳/補上原圖（**先裁剪再上傳**，已存原圖可重裁）、OCR 建議（每欄帶置信度，低於閾值提示人工複核）、刪除票據、ZIP 匯出（分類篩選**列表一律含下級**；提取圖片有「包含下級」開關，默認開；ZIP 文件夾用字典完整路徑） | ✅ 可用（OCR 需配置才啟用） | `ReceiptService` / `ImageCropDialog.vue` |
-| Storage | 本地文件上傳 / 下載 / 刪除、MD5、**按 MD5 去重**（同內容共用一個物理文件，最後一筆記錄刪掉時才刪磁盤）；文件類別篩選**選上級連同下級一起算** | ✅ 可用 | `FileService` |
+| Storage | 本地文件上傳 / 下載 / 刪除、MD5、**按 MD5 去重**（同內容共用一個物理文件，最後一筆記錄刪掉時才刪磁盤）；文件類別**只認白名單分組**（`FileService.FileTypeGroups`），類別選項走 `GET /api/storage/types`；篩選可按字典項（**選上級連同下級一起算**）或整個分組（`type=group:<代碼>`） | ✅ 可用 | `FileService` |
 | Storage | 按地盤 / 帳戶的檔案權限（FilePermission） | ❌ 未實現，目前只有 Admin / 非 Admin 粗粒度 | — |
-| Storage | 上傳類別的限制 | ⚠️ 只擋了「Accounting 分組需 Admin」，其餘分組任何已登入用戶都能上傳；是否需要更嚴的白名單待定 | `FileService.上传Async` |
+| Storage | 上傳類別的限制 | ✅ 只能落在白名單分組（支出分類／票據類型／地盤分類／考勤卡圖片），其他分組一律拒絕；Accounting 分組另需 Admin | `FileService.上传Async` |
 | System | 系統字典：分組管理 + 字典項 CRUD，字典值自動編號、可調整排序；**字典項支援上級（`ParentId`）**，同分組內多層（地盤「牛房 → 一樓 / 二樓」），識別碼按層級自動編成 1、1.1、1.1.1，換上級自動重新編號；上級停用時下級一併不可選（`EnsureEnabledAsync`，歷史資料不受影響）；接口不重複返回字典名稱，前端按 id 映射（`dictText()`） | ✅ 可用（字典頁樹形顯示；會計票據、考勤地盤／職位、文件庫類別、字典上級一律用樹形下拉 `DictTreeSelect`） | `SysDictGroupService` / `SysDictService` / `frontend/src/utils/dicts.ts` / `frontend/src/components/DictTreeSelect.vue` |
 | 前端 | 登入、工作台、考勤、會計、文件、字典、用戶頁 | ✅ 可用 | `frontend/src/views` |
 

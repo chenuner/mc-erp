@@ -15,13 +15,19 @@
 
 ```
 mc-erp/
-├── AGENTS.md              # AI 編程行為規範
+├── AGENTS.md              # AI 編程入口（命令、金科玉律、任務路由）
 ├── specs/                 # 技術規範（唯一真理源）
-│   ├── README.md          # specs 導航
+│   ├── README.md          # specs 導航（按任務選讀）
 │   ├── status.md          # 當前實現狀態
 │   ├── tech-stack.md      # 技術棧規範
-│   ├── architecture.md    # 架構規範
-│   └── design-system.md   # 前端設計系統
+│   ├── architecture.md    # 架構：分層、模組、目錄、DB、API
+│   ├── design-system.md   # 前端設計系統
+│   └── domain/            # 各模組業務規則（改哪塊讀哪份）
+│       ├── attendance.md  # 打卡、工數、薪酬、考勤卡
+│       ├── accounting.md  # 收據、OCR、ZIP 提取
+│       ├── storage.md     # 文件、MD5 去重、下載
+│       └── system-dict.md # 字典層級、樹形下拉、分類篩選
+├── docs/archive/          # 歷史決策與未結項（已結案記錄）
 ├── backend/               # ASP.NET Core 後端
 │   ├── Common/            # 公共基礎設施
 │   ├── Features/          # 業務模組
@@ -123,11 +129,11 @@ pnpm run dev
 
 ### 添加新功能
 
-1. 閱讀 [specs/architecture.md](specs/architecture.md) 了解模組結構
+1. 按 [AGENTS.md 的「任務 → 先讀哪份」](AGENTS.md#任務--先讀哪份按需讀不要一次全讀) 表讀對應的規範（架構 + 那個模組的業務規則），不用把 specs 全讀完
 2. 在 `backend/Features/{ModuleName}/` 下按 Endpoints / Services / Entities / Repositories 分層
 3. 在 `ErpDbContext` 中註冊實體
 4. 在 `Program.cs` 中註冊 DI（本項目手動註冊，未用 Scrutor 掃描）
-5. 跑 `pwsh -File scripts/check.ps1` 驗證
+5. 跑 `pwsh -File scripts/check.ps1` 驗證，並照「改完要同步的文檔」更新 specs
 
 ### 清理倉庫
 

@@ -4,6 +4,9 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
 try {
+    Write-Host '==> Docs check' -ForegroundColor Cyan
+    & (Join-Path $PSScriptRoot 'check-docs.ps1')
+
     Write-Host '==> dotnet build' -ForegroundColor Cyan
     dotnet build backend/MC.Erp.slnx --nologo
     if ($LASTEXITCODE -ne 0) { throw 'dotnet build 失敗' }

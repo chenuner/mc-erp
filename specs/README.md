@@ -1,25 +1,35 @@
-# specs — 唯一真理源
+# specs — 規範的唯一來源
 
-> specs/ 是本項目所有技術規範的唯一真理源。Git 管理，禁止在外部定義規範。
-
----
-
-## 文檔地圖
-
-| 文檔 | 作用 | 什麼時候讀 |
-|------|------|-----------|
-| [status.md](./status.md) | 決定"現在有什麼" — 已實現 / 未接線功能 | 動手前、懷疑功能是否存在時 |
-| [tech-stack.md](./tech-stack.md) | 決定"能寫什麼" — 語言、框架、庫版本、環境約束 | 引入新依賴、選技術方案前 |
-| [architecture.md](./architecture.md) | 決定"寫在哪" — 分層、模組邊界、依賴流向、物理結構 | 新建文件、加模組、跨模組調用前 |
-| [design-system.md](./design-system.md) | 決定"長什麼樣" — 視覺、組件、交互 | 寫前端頁面前 |
+> specs/ 是所有技術規範的唯一來源，Git 管理。代碼和 specs 不一致時以 specs 為準；specs 錯了就改 specs，但不能繞過。
 
 ---
 
-## 閱讀順序
+## 文檔索引
 
-**通用編碼任務**：status.md → tech-stack.md → architecture.md → 開干
+| 文檔 | 管什麼 | 什麼時候讀 |
+|------|--------|-----------|
+| [status.md](./status.md) | 現在有什麼、沒有什麼（已實現 / 未接線） | 動手前、懷疑功能是否存在時 |
+| [architecture.md](./architecture.md) | 寫在哪：分層、模組邊界、目錄結構、數據庫、API 與標識符、認證 | 新建文件、加模組、跨模組調用前 |
+| [tech-stack.md](./tech-stack.md) | 能寫什麼：語言、框架、庫版本、禁止引入 | 加依賴、選技術方案前 |
+| [design-system.md](./design-system.md) | 長什麼樣：視覺、組件、交互 | 寫前端頁面前 |
+| [domain/system-dict.md](./domain/system-dict.md) | 字典層級、識別碼、樹形下拉、停用傳播、按分類篩選 | 動字典、任何分類下拉或篩選時 |
+| [domain/attendance.md](./domain/attendance.md) | 打卡明細、工數與薪酬公式、考勤卡掃描與同步 | 動考勤 / 薪酬時 |
+| [domain/accounting.md](./domain/accounting.md) | 收據欄位、原圖裁剪、OCR、ZIP 提取 | 動會計收據時 |
+| [domain/storage.md](./domain/storage.md) | 文件元數據、MD5 去重、刪除語義、兩條下載路 | 動文件上傳 / 下載時 |
 
-**架構決策**：architecture.md → 修改 → 如果重大變更記錄到 README 變更日誌
+歷史決策（為什麼當初這樣定）在 [docs/archive/decisions-2026-11-22.md](../docs/archive/decisions-2026-11-22.md)。
+
+---
+
+## 怎麼讀
+
+**不要從頭讀到尾。** 先看 [AGENTS.md 的「任務 → 先讀哪份」](../AGENTS.md#任務--先讀哪份按需讀不要一次全讀) 表，只讀當前任務相關的一兩份，讀完就開干。
+
+這樣分的理由：
+
+- `AGENTS.md` 只放「每次都會用到」的東西：驗證命令、金科玉律、任務路由、禁區。
+- 業務規則按模組拆開（`specs/domain/*`），改會計就不必把考勤的計薪公式讀進上下文。
+- 架構文件只留跨模組的結構約定，不混業務規則。
 
 ---
 
@@ -37,8 +47,8 @@
 ## 修改流程
 
 1. 發現 specs 需要修改
-2. 修改對應文件
-3. 合併後立即同步代碼實現
+2. 修改對應文件（動手前就先改，避免代碼和規範脫節）
+3. 同一個改動裡同步代碼實現
 
 **規則**：代碼和 specs 不一致時，以 specs 為準。specs 錯了就改 specs，但不能繞過 specs。
 

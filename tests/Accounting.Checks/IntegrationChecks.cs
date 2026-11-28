@@ -329,6 +329,27 @@ internal static class IntegrationChecks
             var secondPage = await Get("storage/files?pageSize=1&page=2");
             Check(allFileCount >= 2 && secondPage.GetProperty("items").GetArrayLength() == 1
                 && secondPage.GetProperty("page").GetInt32() == 2, "storage list paginates by page size");
+            // 文件類別只認白名單分組；篩選可以按整個分組（分組本身沒有 id）
+            var storageTypes = await Get("storage/types");
+            var typeGroups = storageTypes.GetProperty("groups").EnumerateArray()
+                .Select(item => item.GetProperty("code").GetString()!).ToList();
+            Check(typeGroups.Count > 0
+                && typeGroups.All(code => code is "Accounting" or "AccountingDocumentType" or "AccountingSiteCategory" or "AttendanceCard"),
+                "storage types only expose whitelisted groups");
+            var typeDictGroups = storageTypes.GetProperty("dicts").EnumerateArray()
+                .Select(item => item.GetProperty("groupName").GetString()!).Distinct().ToList();
+            Check(typeDictGroups.Count > 0 && typeDictGroups.All(typeGroups.Contains),
+                "storage types dicts all belong to the listed groups");
+            using (var rejected = new MultipartFormDataContent())
+            {
+                rejected.Add(new ByteArrayContent([1, 2, 3]), "file", "rejected.txt");
+                using var wrongGroup = await client.PostAsync($"storage/files?type={dictOneId}", rejected);
+                Check(wrongGroup.StatusCode == HttpStatusCode.BadRequest, "group outside the file type whitelist rejected");
+            }
+            var byGroup = await Get("storage/files?type=group:Accounting");
+            Check(byGroup.GetProperty("total").GetInt32() >= 1 && byGroup.GetProperty("items").EnumerateArray()
+                .All(item => item.GetProperty("type").ValueKind != JsonValueKind.Null), "storage list filters by a whole group");
+
             using (var disablePending = await client.PutAsJsonAsync($"system/dicts/{pendingId}", new { enabled = false }))
                 Check(disablePending.StatusCode == HttpStatusCode.BadRequest, "pending category cannot be disabled");
             using (var deletePending = await client.DeleteAsync($"system/dicts/{pendingId}"))

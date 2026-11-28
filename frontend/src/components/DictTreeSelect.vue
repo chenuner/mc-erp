@@ -19,6 +19,8 @@ const props = withDefaults(
     keepDisabledValue?: boolean
     /** 額外不可選的識別碼，例如「待分類」不能保存。 */
     disabledCodes?: string[]
+    /** 分組節點可選（值 `group:<分組代碼>`）：查詢/篩選要能一次選整個分組，寫入端不要開。 */
+    selectableGroups?: boolean
     placeholder?: string
     clearable?: boolean
     disabled?: boolean
@@ -28,6 +30,7 @@ const props = withDefaults(
     allowDisabled: false,
     keepDisabledValue: true,
     disabledCodes: () => [],
+    selectableGroups: false,
     placeholder: '請選擇',
     clearable: false,
     disabled: false,
@@ -82,7 +85,7 @@ const tree = computed<DictTreeNode[]>(() => {
     .map((group) => ({
       value: `group:${group.code}`,
       label: group.name,
-      disabled: true,
+      disabled: !props.selectableGroups,
       sysDict: null,
       children: applyPolicy(dictTree(dictsByGroup.get(group.code) ?? [])),
     }))
@@ -91,7 +94,13 @@ const tree = computed<DictTreeNode[]>(() => {
 
 /** 選中後輸入框要顯示的文字：分組 / 上級 / 自己。找不到（字典還沒載入或已刪）就不顯示裸 ID。 */
 function selectedText(value: unknown): string {
-  const dict = byId.value.get(String(value ?? ''))
+  const key = String(value ?? '')
+  if (key.startsWith('group:')) {
+    const code = key.slice('group:'.length)
+    const name = groupNameByCode.value.get(code)
+    return name ? `${name}（整個分組）` : ''
+  }
+  const dict = byId.value.get(key)
   if (!dict) return ''
   const parts = [groupNameByCode.value.get(dict.groupName), dictPath(dict, props.dicts)].filter(
     (part): part is string => !!part,
